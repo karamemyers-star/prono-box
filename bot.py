@@ -1,76 +1,109 @@
 import os
+import threading
+import time
+from datetime import datetime
 from flask import Flask
-from threading import Thread
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-TOKEN = os.getenv("BOT_TOKEN")
-PORT = int(os.environ.get("PORT", 10000))
+# === CONFIG ===
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Mets ton token dans Render > Environment
+# Si tu n'as pas mis de variable, colle ton token ici entre guillemets:
+# BOT_TOKEN = "TON_TOKEN_ICI"
 
-TOP_3_SAFE = [
-    ("🔒 SAFE #1", "Bayern Munich gagne", "1.32", "Bayern à domicile vs Bodo - LDC ce soir"),
-    ("🔒 SAFE #2", "Man United gagne", "1.28", "Old Trafford - retour LDC vs Sabah"),
-    ("🔒 SAFE #3", "Stevenage ou Nul + Over 1.5", "1.40", "20h00 - League One")
-]
+app = Flask(__name__)
+@app.route('/')
+def home():
+    return "PRONO-BOX V10 LIVE ✅ - 24H/24"
 
-PRONOS_JEUDI = {
-    "foot": [
-        ("Bayern Munich vs Bodo/Glimt 02h00", "Bayern gagne", "1.32", "Bayern invaincu domicile LDC"),
-        ("Man United vs Sabah Baku 02h00", "Man United gagne", "1.28", "Grosse cote safe - MU favori"),
-        ("Stevenage vs Luton Town 20h00", "Stevenage ou Nul + Over 1.5", "1.40", "League One ce soir"),
-        ("Fenerbahce vs AS Roma 23h45", "Les 2 marquent", "1.55", "Match ouvert LDC"),
-        ("PSV vs Shakhtar 23h45", "PSV gagne", "1.45", "PSV fort à domicile")
-    ],
-    "basket": [
-        ("Monaco vs Milano", "Monaco gagne", "1.38", "Monaco Euroleague à domicile"),
-        ("Real Madrid vs Fenerbahce", "Over 158.5", "1.40", "2 attaques")
-    ],
-    "volley": [("Perugia vs Lube Civitanova", "Perugia gagne", "1.35", "Leader Serie A")],
-    "tennis": [("Sinner vs Alcaraz", "Over 3.5 sets", "1.45", "Toujours serré")]
-}
+# === TES PRONOS - MODIFIE ICI TOUS LES JOURS ===
+MONTANTE_JOUR = """🔥 MONTANTE DU JOUR - 10/09 🔥
 
-def build_text(f="all"):
-    cote=1
-    txt="🎯 PRONO BOX V10 - JEUDI 10/09/2026\n🤖 VRAIS MATCHS DU JOUR\n━━━━━━━━━━━━━━\n"
-    if f=="top":
-        txt+="\n🏆 TOP 3 LES PLUS SAFE CE SOIR:\n"
-        for t,p,c,a in TOP_3_SAFE:
-            txt+=f"\n{t}\n👉 {p} @ {c}\n📊 {a}\n"
-            cote*=float(c)
-        txt+=f"\n💰 COTE COMBINEE: {cote:.2f} - MISE 10.000F = {int(cote*10000)}F"
-        return txt
-    sports=PRONOS_JEUDI if f=="all" else {f:PRONOS_JEUDI.get(f,[])}
-    for s,m in sports.items():
-        txt+=f"\n--- {s.upper()} ---\n"
-        for x,y,z,w in m: txt+=f"\n{x}\n👉 {y} @ {z}\n"
-    return txt
+1️⃣ PSG vs Atalanta - 1X + Over 1.5 @1.45
+2️⃣ Barca vs Newcastle - 1X + Over 1.5 @1.43
 
+COTE TOTALE: @2.07
+MISE: 10% BANKROLL"""
+
+TOP3_SAFE = """💰 TOP 3 SAFE DU JOUR 💰
+
+✅ Manchester City gagne @1.50
+✅ Bayern + Over 1.5 @1.40
+✅ Real Madrid 1X @1.35
+
+COTE TOTALE: @2.83"""
+
+LDC_SOIR = """🏆 LDC CE SOIR 🏆
+
+🔹 PSG vs Atalanta - 1X+Over1.5 @1.45 ✅
+🔹 Bayern vs Chelsea - Over 2.5 @1.55 ✅
+🔹 Real vs Marseille - 1 @1.60 ✅
+
+Analyse complète en VIP!"""
+
+# === BOUTONS ===
+def get_main_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("💰 MONTANTE DU JOUR", callback_data='montante')],
+        [InlineKeyboardButton("🔥 TOP 3 SAFE", callback_data='top3'),
+         InlineKeyboardButton("🏆 LDC CE SOIR", callback_data='ldc')],
+        [InlineKeyboardButton("📊 BANKROLL", callback_data='bankroll'),
+         InlineKeyboardButton("👑 DEVENIR VIP", callback_data='vip')]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# === COMMANDES ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb=[[InlineKeyboardButton("🏆 TOP 3 SAFE CE SOIR", callback_data="top")],[InlineKeyboardButton("⚽ Foot", callback_data="foot"), InlineKeyboardButton("🏀 Basket", callback_data="basket")],[InlineKeyboardButton("📋 TOUS LES MATCHS", callback_data="all")]]
-    await update.message.reply_text("🤖 PRONO BOX V10 EN LIGNE\nJeudi 10/09/2026 - Vrais matchs du soir!", reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text(
+        "👑 **PRONO BOX V10 24H/24** 👑\n\n"
+        "Bot en ligne H24! ✅\n"
+        "Montante automatique à 8h!\n\n"
+        "Choisis ton ticket 👇",
+        reply_markup=get_main_keyboard(),
+        parse_mode='Markdown'
+    )
 
-async def btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query
-    await q.answer()
-    if q.data=="menu": 
-        await update.message.reply_text("Menu:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏆 TOP 3 SAFE", callback_data="top")]]))
-        return
-    txt=build_text(q.data)
-    kb=[[InlineKeyboardButton("🏆 TOP 3 SAFE", callback_data="top")],[InlineKeyboardButton("⬅️ Menu", callback_data="menu")]]
-    try: await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
-    except: await q.message.reply_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == 'montante':
+        await query.message.reply_text(MONTANTE_JOUR, reply_markup=get_main_keyboard())
+    elif query.data == 'top3':
+        await query.message.reply_text(TOP3_SAFE, reply_markup=get_main_keyboard())
+    elif query.data == 'ldc':
+        await query.message.reply_text(LDC_SOIR, reply_markup=get_main_keyboard())
+    elif query.data == 'bankroll':
+        await query.message.reply_text(
+            "📊 **GESTION BANKROLL V10** 📊\n\n"
+            "Bankroll: 100.000 FCFA\n"
+            "Mise par ticket: 10% = 10.000F\n"
+            "Objectif: +15% par semaine\n\n"
+            "Reste discipliné BOSS!",
+            reply_markup=get_main_keyboard(), parse_mode='Markdown'
+        )
+    elif query.data == 'vip':
+        await query.message.reply_text(
+            "👑 **DEVENIR VIP** 👑\n\n"
+            "✅ 3 tickets safe / jour\n"
+            "✅ Montante complète\n"
+            "✅ Score exact\n"
+            "✅ Support H24\n\n"
+            "Contacte @TonPseudoVIP\n"
+            "Prix: 10.000F / mois",
+            reply_markup=get_main_keyboard()
+        )
 
-flask_app=Flask(__name__)
-@flask_app.route('/')
-def home(): return "BOT V10 EN LIGNE - VRAIS MATCHS 10/09"
-
-def run_flask(): flask_app.run(host='0.0.0.0', port=PORT)
 def run_bot():
-    app=ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(btn))
-    app.run_polling()
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("montante", start))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    print("BOT V10 LANCÉ...")
+    application.run_polling()
 
-if __name__=="__main__":
-    Thread(target=run_flask).start()
-    run_bot()
+# === LANCEMENT DOUBLE (WEB + BOT) ===
+if __name__ == '__main__':
+    threading.Thread(target=run_bot, daemon=True).start()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
