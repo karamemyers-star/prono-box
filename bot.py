@@ -4,33 +4,41 @@ from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# --- 1. ON RECUPERE LE TOKEN ---
 TOKEN = os.getenv("BOT_TOKEN")
-print(f"TOKEN TROUVE: {'OUI' if TOKEN else 'NON'}", flush=True)
 
-# --- 2. FLASK POUR RENDER (pour rester en vie) ---
-app = Flask(__name__)
-@app.route('/')
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
 def home():
-    return "BOT PRONO-BOX IS LIVE!"
+    return "Prono-Box Bot is LIVE!"
 
-# --- 3. COMMANDE /start DU BOT ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("BOSS! Ton bot Prono-Box tourne 24h/24 sur Render! 🔥")
-
-# --- 4. FONCTION QUI LANCE LE BOT ---
-def run_bot():
-    print(">>> LANCEMENT DU BOT TELEGRAM...", flush=True)
-    if not TOKEN:
-        print(">>> ERREUR: BOT_TOKEN manquant!", flush=True)
-        return
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    print(">>> BOT LANCE AVEC SUCCES <<<", flush=True)
-    application.run_polling()
-
-# --- 5. LANCEMENT DOUBLE: WEB + BOT ---
-if __name__ == "__main__":
-    threading.Thread(target=run_bot, daemon=True).start()
+def run_flask():
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    flask_app.run(host="0.0.0.0", port=port)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Salut BOSS! Le bot Prono-Box est enfin en ligne! Tape /prono")
+
+async def prono(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Ici tes pronos vont arriver...")
+
+def main():
+    if not TOKEN:
+        print("ERREUR: BOT_TOKEN non trouvé!")
+        return
+    
+    print("TOKEN TROUVE: OUI")
+    
+    # Lance Flask en arrière-plan
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    print(">>> LANCEMENT DU BOT TELEGRAM...")
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("prono", prono))
+    
+    print(">>> BOT LANCE AVEC SUCCES <<<")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
