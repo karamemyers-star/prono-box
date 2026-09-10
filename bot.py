@@ -1,41 +1,66 @@
-import os, json, time, threading
+import os
 from flask import Flask
-import urllib.request, urllib.parse
+from threading import Thread
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-TOKEN="8808108179:AAEAm9ojlgS2HAhZNS3J8QdEp5zk70mFk5Q"
-app=Flask(__name__)
-@app.route('/')
-def home(): return "BOT V8 ONLINE 24/24 - PRONO BOX"
+TOKEN = os.getenv("BOT_TOKEN")
+PORT = int(os.environ.get("PORT", 10000))
 
-def send(c,t,k=None):
- d={"chat_id":c,"text":t,"parse_mode":"Markdown"}
- if k: d["reply_markup"]=json.dumps(k)
- try:
-  req=urllib.request.Request(f"https://api.telegram.org/bot{TOKEN}/sendMessage",data=urllib.parse.urlencode(d).encode())
-  urllib.request.urlopen(req,timeout=10)
- except: pass
+TOP_3_SAFE = [
+    ("🔒 SAFE #1", "Monaco Basket gagne", "1.38", "Le plus safe du jour"),
+    ("🔒 SAFE #2", "Bayern ou Nul + Over 1.5", "1.35", "Foot - Grosse faille"),
+    ("🔒 SAFE #3", "Perugia Volley gagne", "1.35", "Volley - 99% favori")
+]
 
-def kb():
- return {"inline_keyboard":[[{"text":"💰 MONTANTE DU JOUR","callback_data":"m"}],[{"text":"🔥 TOP 3 SAFE","callback_data":"t"}],[{"text":"🏆 LDC CE SOIR","callback_data":"l"}]]}
+PRONOS_JEUDI = {
+    "foot": [("Bayern Munich vs Bodo/Glimt", "Bayern ou Nul + Over 1.5", "1.35", "Bayern invaincu domicile"), ("PSV vs Shakhtar", "PSV gagne", "1.45", "PSV fort à domicile")],
+    "basket": [("Monaco vs Milano", "Monaco gagne", "1.38", "Monaco fort"), ("Real vs Fener", "Over 158.5 pts", "1.40", "2 attaques")],
+    "tennis": [("Sinner vs Alcaraz", "Over 3.5 sets", "1.40", "Toujours serré")],
+    "volley": [("Perugia vs Lube", "Perugia gagne", "1.35", "Leader invaincu")]
+}
 
-def loop():
- try: urllib.request.urlopen(f"https://api.telegram.org/bot{TOKEN}/deleteWebhook?drop_pending_updates=True",timeout=5)
- except: pass
- off=0
- print("BOT V8 LANCE")
- while True:
-  try:
-   with urllib.request.urlopen(f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={off}&timeout=30",timeout=35) as r:
-    for u in json.loads(r.read().decode()).get("result",[]):
-     off=u["update_id"]+1
-     if "message" in u:
-      ch=u["message"]["chat"]["id"]
-      send(ch,"*🔥 PRONO BOX V8 24H/24* 🇨🇲\n\nBot en ligne H24!\nCote potion 1.45",kb())
-     if "callback_query" in u:
-      ch=u["callback_query"]["message"]["chat"]["id"]
-      send(ch,"✅ *MONTANTE 10/09*\n\nPSG vs Atalanta - 1X+Over 1.5 @1.45\nBarca vs Newcastle - 1X+Over 1.5 @1.43\nCombo @1.45",kb())
-  except Exception as e:
-   print(e); time.sleep(5)
+def build_text(f="all"):
+    cote=1
+    txt="🎯 PRONO BOX V10 - JEUDI 10/09\n🤖 CHERCHEUR MULTI-SPORT\n━━━━━━━━━━━━━━\n"
+    if f=="top":
+        txt+="\n🏆 TOP 3 LES PLUS SAFE:\n"
+        for t,p,c,a in TOP_3_SAFE:
+            txt+=f"\n{t}\n👉 {p} @ {c}\n📊 {a}\n"
+            cote*=float(c)
+        txt+=f"\n💰 COTE COMBINEE: {cote:.2f}"
+        return txt
+    sports=PRONOS_JEUDI if f=="all" else {f:PRONOS_JEUDI.get(f,[])}
+    for s,m in sports.items():
+        txt+=f"\n--- {s.upper()} ---\n"
+        for x,y,z,w in m: txt+=f"\n{x}\n👉 {y} @ {z}\n📊 {w}\n"
+    return txt
 
-threading.Thread(target=loop,daemon=True).start()
-if __name__=="__main__": app.run(host='0.0.0.0',port=int(os.environ.get("PORT",10000)))
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb=[[InlineKeyboardButton("🏆 TOP 3 SAFE DU JOUR", callback_data="top")],[InlineKeyboardButton("⚽ Foot", callback_data="foot"), InlineKeyboardButton("🏀 Basket", callback_data="basket")],[InlineKeyboardButton("📋 TOUS", callback_data="all")]]
+    await update.message.reply_text("🤖 BOT V10 EN LIGNE 24/24\nJeudi 10/09 - Prêt BOSS!", reply_markup=InlineKeyboardMarkup(kb))
+
+async def btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q=update.callback_query
+    await q.answer()
+    if q.data=="menu": 
+        await start(update, context)
+        return
+    txt=build_text(q.data)
+    kb=[[InlineKeyboardButton("🏆 TOP 3 SAFE", callback_data="top")],[InlineKeyboardButton("⬅️ Menu", callback_data="menu")]]
+    await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb))
+
+flask_app=Flask(__name__)
+@flask_app.route('/')
+def home(): return "BOT V10 EN LIGNE"
+
+def run_flask(): flask_app.run(host='0.0.0.0', port=PORT)
+def run_bot():
+    app=ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(btn))
+    app.run_polling()
+
+if __name__=="__main__":
+    Thread(target=run_flask).start()
+    run_bot()
