@@ -1,4 +1,4 @@
-import os, threading, requests
+import os, threading, requests, json
 from datetime import datetime, timedelta
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -7,6 +7,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FOOT_API = os.getenv("FOOTBALL_API_KEY")
 CHAT_ID_FILE = "/tmp/chat_id.txt"
+BILAN_FILE = "/tmp/bilan_pires_def.json"
 app = Flask(__name__)
 HEADERS = {"x-apisports-key": FOOT_API}
 TOP5_LEAGUES = [39, 140, 135, 78, 61]
@@ -17,6 +18,23 @@ def save_chat_id(c):
 def get_saved_chat_id():
     try: return open(CHAT_ID_FILE,"r").read().strip()
     except: return None
+
+# --- GESTION BILAN ---
+def load_bilan():
+    try:
+        with open(BILAN_FILE,"r") as f: return json.load(f)
+    except: return []
+
+def save_bilan_entry(match_data):
+    bilan = load_bilan()
+    # Eviter doublon meme jour meme match
+    for b in bilan:
+        if b['date']==match_data['date'] and b['home']==match_data['home'] and b['away']==match_data['away']:
+            return
+    bilan.append(match_data)
+    try:
+        with open(BILAN_FILE,"w") as f: json.dump(bilan[-100:], f) # On garde les 100 derniers
+    except: pass
 
 def get_team_stats(team_id):
     try:
@@ -84,7 +102,15 @@ def scan_global(mode="btts_strict"):
                     away_faible = sa['encaisse_pct']>=85 and sa['avg_conceded']>=1.5 and sa['avg_goals']<=0.9 and sa['invincible_pct']<=35
                     valid = home_faible or away_faible
                 if not valid: continue
-                best.append({"home":f['teams']['home']['name'],"away":f['teams']['away']['name'],"league":f['league']['name'],"date":date_str,"time":f['fixture']['date'][11:16],"sh":sh,"sa":sa,"h2h":h2h})
+                data = {"home":f['teams']['home']['name'],"away":f['teams']['away']['name'],"league":f['league']['name'],"date":date_str,"time":f['fixture']['date'][11:16],"sh":sh,"sa":sa,"h2h":h2h}
+                # Si c'est pires defenses, on l'enregistre direct dans le bilan
+                if mode=="pires_defenses":
+                    if sh['encaisse_pct']>=85 and sh['avg_goals']<=0.9:
+                        faible=f['teams']['home']['name']; fort=f['teams']['away']['name']; sf=sh
+                    else:
+                        faible=f['teams']['away']['name']; fort=f['teams']['home']['name']; sf=sa
+                    save_bilan_entry({"date":date_str,"league":f['league']['name'],"home":f['teams']['home']['name'],"away":f['teams']['away']['name'],"faible":faible,"fort":fort,"stats_faible":sf,"enregistre_le":datetime.now().strftime("%d/%m %H:%M")})
+                best.append(data)
                 if len(best)>=7: break
             if len(best)>=7: break
         except: continue
@@ -97,17 +123,31 @@ def get_menu():
         [InlineKeyboardButton("⚽ TEAM 2 BUTS", callback_data="team2buts")],
         [InlineKeyboardButton("🛡️ DOUBLE CHANCE", callback_data="doublechance")],
         [InlineKeyboardButton("💎 SAFE TOP 5", callback_data="safe_top5")],
-        [InlineKeyboardButton("💀 PIRES DEFENSES", callback_data="pires_defenses")]
+        [InlineKeyboardButton("💀 PIRES DEFENSES", callback_data="pires_defenses")],
+        [InlineKeyboardButton("📊 BILAN PIRES DEF", callback_data="bilan")]
     ]
     return InlineKeyboardMarkup(kb)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_chat_id(update.effective_chat.id)
-    await update.message.reply_text(f"V11.6 FINALE OK - ID {update.effective_chat.id}\n6 boutons actifs - Auto 08h Douala", reply_markup=get_menu())
+    await update.message.reply_text(f"V11.7 BILAN OK - ID {update.effective_chat.id}\n7 boutons - Auto 08h Douala - Donnees auto", reply_markup=get_menu())
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q=update.callback_query; await q.answer()
     mode=q.data
+
+    if mode=="bilan":
+        bilan=load_bilan()
+        if not bilan:
+            await q.message.reply_text("Bilan vide pour l'instant. Clique d'abord sur 💀 PIRES DEFENSES pour enregistrer.", reply_markup=get_menu())
+            return
+        txt=f"📊 BILAN PIRES DEFENSES - {len(bilan)} matchs enregistres\n\n"
+        for i,b in enumerate(bilan[-15:],1): # On affiche les 15 derniers
+            txt+=f"{i}. {b['date']} {b['league']}\n{b['home']} vs {b['away']}\nPire: {b['faible']} ({b['stats_faible']['encaisse_pct']}% enc, {b['stats_faible']['avg_conceded']} encaiss/moy)\nFort: {b['fort']} | Enregistre: {b['enregistre_le']}\n\n"
+        txt+="\nLe fichier s'actualise a chaque scan Pires Def."
+        await q.message.reply_text(txt, reply_markup=get_menu())
+        return
+
     await q.edit_message_text(f"Scan {mode} en cours...")
     best=scan_global(mode)
     if not best:
@@ -120,7 +160,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 faible=m['home']; fort=m['away']; sf=m['sh']
             else:
                 faible=m['away']; fort=m['home']; sf=m['sa']
-            txt+=f"{i}. {m['date']} {m['league']}\n{m['home']} vs {m['away']}\n🚨 PIRE DEF: {faible} Enc {sf['encaisse_pct']}% {sf['avg_conceded']} encaisses/moy Att {sf['avg_goals']}\n✅ JOUER: {fort} X2 @1.25 OU Over 1.5 {fort} @1.60\n\n"
+            txt+=f"{i}. {m['date']} {m['league']}\n{m['home']} vs {m['away']}\n🚨 PIRE: {faible} Enc {sf['encaisse_pct']}% Att {sf['avg_goals']}\n✅ JOUER: {fort} X2 @1.25 OU Over 1.5 {fort} @1.60\n[Enregistre dans BILAN]\n\n"
         else:
             txt+=f"{i}. {m['date']} {m['time']} {m['league']}\n{m['home']} vs {m['away']}\n\n"
     await q.message.reply_text(txt, reply_markup=get_menu())
@@ -128,13 +168,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def auto_daily_job(context: ContextTypes.DEFAULT_TYPE):
     chat_id=get_saved_chat_id()
     if not chat_id: return
-    best=scan_global("btts_strict") or scan_global("safe_top5") or scan_global("pires_defenses") or scan_global("btts_relax")
+    best=scan_global("pires_defenses") # Le matin il va deja enregistrer les pires def dans le bilan
+    if not best: best=scan_global("btts_strict") or scan_global("safe_top5") or scan_global("btts_relax")
     if not best: return
     m=best[0]
-    await context.bot.send_message(chat_id=chat_id, text=f"AUTO 08H - {m['league']}\n{m['home']} vs {m['away']}", reply_markup=get_menu())
+    await context.bot.send_message(chat_id=chat_id, text=f"AUTO 08H BILAN MIS A JOUR\n{m['league']}\n{m['home']} vs {m['away']}\nClique BILAN pour voir historique", reply_markup=get_menu())
 
 @app.route("/")
-def home(): return "V11.6 Live"
+def home(): return "V11.7 BILAN Live"
 def run_flask(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
 if __name__=="__main__":
     threading.Thread(target=run_flask, daemon=True).start()
