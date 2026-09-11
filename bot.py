@@ -1,27 +1,27 @@
 import os
-from flask import Flask, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+import threading
+from flask import Flask
+from telegram.ext import Application, CommandHandler
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 app = Flask(__name__)
-application = Application.builder().token(BOT_TOKEN).build()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 PRONO BOX V10.04 LIVE\n\nDom 95% vs Faible JPN D2\nYankees vs White Sox RL Anti-faible\n\n/start /demain /apresdemain")
-
-application.add_handler(CommandHandler("start", start))
+async def start(update, context):
+    await update.message.reply_text("✅ SAFE DU JOUR ACTIF\nPSG 1X+Over1.5 @1.47 Confiance 92%\nTape /montante")
 
 @app.route("/")
 def home():
-    return "Prono-Box V10.04 LIVE"
+    return "Bot Actif"
 
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-async def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, application.bot)
-    await application.process_update(update)
-    return "ok"
+def run_bot():
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("safe", start))
+    application.add_handler(CommandHandler("montante", start))
+    application.add_handler(CommandHandler("top3", start))
+    application.run_polling(drop_pending_updates=True)
+
+threading.Thread(target=run_bot, daemon=True).start()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
