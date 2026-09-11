@@ -1,5 +1,4 @@
-Flask
-python-telegram-bot[job-queue]
-requests
+
+python-telegram-bot==20.7
 pytz
-Pillow
+python-dotenv
