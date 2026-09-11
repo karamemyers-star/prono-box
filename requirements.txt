@@ -2,5 +2,3 @@ Flask
 python-telegram-bot[job-queue]
 requests
 pytz
-Pillow
-pytesseract
