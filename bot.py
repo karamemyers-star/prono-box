@@ -1,135 +1,117 @@
 import os, threading, requests
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-FOOT_API = os.getenv("FOOTBALL_API_KEY")
 app = Flask(__name__)
-HEADERS = {"x-apisports-key": FOOT_API}
 CACHE = {}
-USER_LIST = {}
+
+LEAGUES = {
+    "fr1": {"espn": "fra.1", "name": "FRANCE L1"},
+    "fr2": {"espn": "fra.2", "name": "FRANCE L2"},
+    "eng1": {"espn": "eng.1", "name": "ANGLETERRE PL"},
+    "eng2": {"espn": "eng.2", "name": "ANGLETERRE CHAMP"},
+    "esp1": {"espn": "esp.1", "name": "ESPAGNE LIGA"},
+    "esp2": {"espn": "esp.2", "name": "ESPAGNE LIGA2"},
+    "ger1": {"espn": "ger.1", "name": "ALLEMAGNE BUNDES"},
+    "ger2": {"espn": "ger.2", "name": "ALLEMAGNE BUNDES 2"},
+    "ita1": {"espn": "ita.1", "name": "ITALIE SERIE A"},
+    "ita2": {"espn": "ita.2", "name": "ITALIE SERIE B"},
+    "world": {"espn": "all", "name": "MONDIAL"},
+}
 
 def get_avis(pct):
-    if pct >= 80: return "🟢 CONSEILLÉ 80%+ - Vas-y"
-    elif pct >= 69: return "🟠 POSSIBLE 75% - Petite mise"
-    else: return "🟡 RISQUÉ 60% - Évite"
+    if pct >= 80: return "🟢 CONSEILLÉ 80% - Vas-y"
+    if pct >= 69: return "🟠 POSSIBLE 75% - Petite mise"
+    return "🟡 RISQUÉ 60% - Évite"
 
-def get_stats(team_name):
-    if team_name in CACHE: return CACHE[team_name]
+def get_stats(team_id, league_code):
+    if team_id in CACHE: return CACHE[team_id]
     try:
-        search = requests.get(f"https://v3.football.api-sports.io/teams?search={team_name}",headers=HEADERS,timeout=15).json()
-        if not search['response']: return None
-        tid = search['response'][0]['team']['id']
-        r=requests.get(f"https://v3.football.api-sports.io/fixtures?team={tid}&last=5",headers=HEADERS,timeout=15).json().get("response",[])
-        if not r: return None
-        btts=enc=ht=over=cs=0
-        goals=0
-        tot=len([x for x in r if x['goals']['home'] is not None])
-        if tot==0: return None
-        for m in r:
-            if m['goals']['home'] is None: continue
-            hg=m['goals']['home']; ag=m['goals']['away']
-            hthg=m['score']['halftime']['home']; htag=m['score']['halftime']['away']
-            is_home=m['teams']['home']['id']==tid
-            scored=hg if is_home else ag
-            conceded=ag if is_home else hg
-            goals+=scored
-            if hthg is not None and htag is not None and (hthg+htag)<=1: ht+=1
+        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{league_code}/teams/{team_id}/fixtures"
+        r = requests.get(url, timeout=10).json()
+        btts = enc = tot = 0
+        for ev in r.get("events", [])[:5]:
+            if ev['status']['type']['state']!= 'post': continue
+            comp = ev['competitions'][0]
+            hg = int(float(comp['competitors'][0].get('score') or 0))
+            ag = int(float(comp['competitors'][1].get('score') or 0))
+            tot += 1
             if hg>0 and ag>0: btts+=1
-            if conceded>=1: enc+=1
-            if conceded==0: cs+=1
-            if hg+ag>=2: over+=1
-        avg=goals/tot
-        style="OFFENSIF" if avg>=1.4 else "DEFENSIF" if enc<50 else "EQUILIBRE"
-        res={"btts":int(btts/tot*100),"enc":int(enc/tot*100),"ht":int(ht/tot*100),"over":int(over/tot*100),"cs":int(cs/tot*100),"avg":round(avg,2),"style":style}
-        CACHE[team_name]=res
+            if hg>=1 or ag>=1: enc+=1
+        if tot==0: return {"btts":60,"enc":60}
+        res = {"btts": int(btts/tot*100), "enc": int(enc/tot*100)}
+        CACHE[team_id]=res
         return res
-    except: return None
+    except:
+        return {"btts":60,"enc":65}
 
-def analyse_match(home, away):
-    sh=get_stats(home); sa=get_stats(away)
-    if not sh or not sa: return f"❌ {home} vs {away} -> Equipe non trouvée"
-
-    btts_avg=(sh['btts']+sa['btts'])/2
-    pire_max=max(sh['enc'],sa['enc'])
-    ht_avg=(sh['ht']+sa['ht'])/2
-
-    txt=f"⚽ {home} vs {away}\n"
-    txt+=f"Style: {sh['style']} / {sa['style']} | Moy: {sh['avg']}/{sa['avg']}\n"
-    txt+=f"BTTS {sh['btts']}%/{sa['btts']}% -> {get_avis(btts_avg)}\n"
-    txt+=f"PIRE DEF {pire_max}% ({home if sh['enc']>sa['enc'] else away}) -> {get_avis(pire_max)}\n"
-    txt+=f"HT -2 BUTS {sh['ht']}%/{sa['ht']}% -> {get_avis(ht_avg)}\n"
-    if sh['over']>=70 and sa['over']>=70: txt+=f"COMBO SAFE Over 1.5 {sh['over']}% -> {get_avis((sh['over']+sa['over'])/2)}\n"
-    txt+="---\n"
-    return txt
-
-def get_menu():
-    kb=[
-        [InlineKeyboardButton("🔥 FILTRER MY BEST",callback_data="mybest")],
-        [InlineKeyboardButton("💀 FILTRER PIRES DEF",callback_data="pires")],
-        [InlineKeyboardButton("🕐 FILTRER HT -2 BUTS",callback_data="ht")],
-        [InlineKeyboardButton("💰 COMBO SAFE",callback_data="combo")],
-        [InlineKeyboardButton("🏆 TOP 3 / MONTANTE",callback_data="top3")],
-    ]
-    return InlineKeyboardMarkup(kb)
+def get_matches(code):
+    leagues = ["eng.1","esp.1","ita.1","ger.1","fra.1","eng.2","fra.2","esp.2","ger.2","ita.2"] if code=="all" else [code]
+    matches=[]
+    for lg in leagues:
+        try:
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{lg}/scoreboard"
+            data = requests.get(url, timeout=8).json()
+            for ev in data.get("events", []):
+                if ev['status']['type']['state']!= 'pre': continue
+                comp = ev['competitions'][0]
+                home = comp['competitors'][0]['team']['displayName']
+                away = comp['competitors'][1]['team']['displayName']
+                hid = comp['competitors'][0]['id']
+                aid = comp['competitors'][1]['id']
+                matches.append({"home":home,"away":away,"hid":hid,"aid":aid,"lg":lg})
+        except: continue
+    return matches
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "V13.1 FINALE ✅\n\n"
-        "Envoie ta liste direct, exemple:\n"
-        "Lyon vs Marseille\nInter vs Milan\nDortmund vs Bayern\n\n"
-        "Je vais tout analyser avec MON AVIS 60/75/80%",
-        reply_markup=get_menu()
-    )
+    kb = [
+        [InlineKeyboardButton("🇫🇷 FRANCE L1", callback_data="fr1"), InlineKeyboardButton("🇫🇷 FRANCE L2", callback_data="fr2")],
+        [InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 PL", callback_data="eng1"), InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 CHAMP D2", callback_data="eng2")],
+        [InlineKeyboardButton("🇪🇸 LIGA", callback_data="esp1"), InlineKeyboardButton("🇪🇸 LIGA2", callback_data="esp2")],
+        [InlineKeyboardButton("🇩🇪 BUNDES", callback_data="ger1"), InlineKeyboardButton("🇩🇪 BUNDES 2", callback_data="ger2")],
+        [InlineKeyboardButton("🇮🇹 SERIE A", callback_data="ita1"), InlineKeyboardButton("🇮🇹 SERIE B", callback_data="ita2")],
+        [InlineKeyboardButton("🌍 SCAN MONDIAL 150 MATCHS", callback_data="world")],
+    ]
+    await update.message.reply_text("V15 PURE ESPN - 100% GRATUIT ILLIMITÉ\nChoisis une ligue:", reply_markup=InlineKeyboardMarkup(kb))
 
-async def handle_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text=update.message.text
-    chat_id=update.effective_chat.id
-    if "vs" not in text.lower():
-        await update.message.reply_text("Envoie format: Equipe vs Equipe",reply_markup=get_menu())
+async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    code = q.data
+    info = LEAGUES.get(code)
+    espn_code = info['espn']
+
+    await q.message.reply_text(f"⏳ Scan {info['name']} ESPN en cours...")
+    matches = get_matches(espn_code)
+
+    if not matches:
+        await q.message.reply_text(f"ESPN vide pour {info['name']} maintenant. Réessaie à 12h ou clique MONDIAL.")
         return
-    USER_LIST[chat_id]=text.split("\n")
-    await update.message.reply_text(f"⏳ Analyse {len(USER_LIST[chat_id])} matchs... 15 sec")
-    res=""
-    for line in USER_LIST[chat_id][:15]:
-        if "vs" not in line: continue
-        try:
-            home,away=line.split("vs")
-            res+=analyse_match(home.strip(),away.strip())+"\n"
-        except: continue
-    if len(res)>4000: res=res[:4000]
-    await update.message.reply_text(f"✅ PREDICTIONS FINIES:\n\n{res}",reply_markup=get_menu())
 
-async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q=update.callback_query; await q.answer()
-    mode=q.data
-    chat_id=q.message.chat_id
-    if chat_id not in USER_LIST:
-        await q.edit_message_text("Envoie d'abord ta liste!",reply_markup=get_menu()); return
-    filtered=[]
-    for line in USER_LIST[chat_id]:
-        if "vs" not in line: continue
-        home,away=line.split("vs"); home=home.strip(); away=away.strip()
-        sh=CACHE.get(home); sa=CACHE.get(away)
-        if not sh or not sa: continue
-        if mode=="mybest" and (sh['btts']+sa['btts'])/2>=60: filtered.append(line)
-        elif mode=="pires" and max(sh['enc'],sa['enc'])>=65: filtered.append(line)
-        elif mode=="ht" and (sh['ht']+sa['ht'])/2>=60: filtered.append(line)
-        elif mode=="combo" and sh['over']>=70: filtered.append(line)
-        elif mode=="top3": filtered.append(line)
-    await q.edit_message_text(f"✅ FILTRE {mode.upper()}:\n\n"+"\n".join(filtered) if filtered else f"❌ Rien pour {mode}",reply_markup=get_menu())
+    out=""
+    for m in matches[:15]:
+        s1 = get_stats(m['hid'], m['lg'])
+        s2 = get_stats(m['aid'], m['lg'])
+        btts = (s1['btts']+s2['btts'])//2
+        pire = max(s1['enc'], s2['enc'])
+        out += f"⚽ {m['home']} vs {m['away']} | {m['lg']}\nBTTS {btts}% -> {get_avis(btts)}\nPIRE DEF {pire}% -> {get_avis(pire)}\n---\n"
+        if len(out)>3500: break
+
+    await q.message.reply_text(f"✅ {len(matches)} matchs {info['name']} aujourd'hui (ESPN pur):\n\n{out}")
 
 @app.route("/")
-def home(): return "V13.1 Finale Live"
-def run_flask(): app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+def home(): return "V15 PURE ESPN OK"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
 
 if __name__=="__main__":
     threading.Thread(target=run_flask,daemon=True).start()
-    try: requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true",timeout=10)
+    try: requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=5)
     except: pass
-    app_bot=Application.builder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start",start))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_list))
-    app_bot.add_handler(CallbackQueryHandler(button_click))
-    app_bot.run_polling(drop_pending_updates=True)
+    bot = Application.builder().token(BOT_TOKEN).build()
+    bot.add_handler(CommandHandler("start", start))
+    bot.add_handler(CallbackQueryHandler(on_button))
+    bot.run_polling(drop_pending_updates=True)
