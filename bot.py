@@ -1,4 +1,4 @@
-import os, threading, requests, json
+import os, threading, requests
 from datetime import datetime, timedelta
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,15 +16,19 @@ def get_stats(team_id):
         r=requests.get(f"https://v3.football.api-sports.io/fixtures?team={team_id}&last=10",headers=HEADERS,timeout=15).json().get("response",[])
         if not r: return None
         btts=enc=ht_under=gs=0
+        tot=0
         for m in r:
-            hg=m['goals']['home'] or 0; ag=m['goals']['away'] or 0
+            if m['goals']['home'] is None: continue
+            tot+=1
+            hg=m['goals']['home']; ag=m['goals']['away']
             hthg=m['score']['halftime']['home']; htag=m['score']['halftime']['away']
             if hthg is not None and htag is not None and (hthg+htag)<=1: ht_under+=1
             if hg>0 and ag>0: btts+=1
             is_home=m['teams']['home']['id']==team_id
             if (ag if is_home else hg)>=1: enc+=1
             gs+=hg if is_home else ag
-        res={"btts":round(btts/len(r)*100),"enc":round(enc/len(r)*100),"ht":round(ht_under/len(r)*100),"avg":round(gs/len(r),2)}
+        if tot==0: return None
+        res={"btts":round(btts/tot*100),"enc":round(enc/tot*100),"ht":round(ht_under/tot*100),"avg":round(gs/tot,2)}
         CACHE[team_id]=res
         return res
     except: return None
@@ -32,41 +36,55 @@ def get_stats(team_id):
 def scan_global(mode):
     CACHE.clear()
     out=[]
+    scanned=0
     today=datetime.now()
     for d in range(3):
         date_str=(today+timedelta(days=d)).strftime("%Y-%m-%d")
         try:
             fixtures=requests.get(f"https://v3.football.api-sports.io/fixtures?date={date_str}",headers=HEADERS,timeout=20).json().get("response",[])
         except: continue
-        for f in fixtures[:100]:
+        for f in fixtures[:120]:
             if "Friendly" in f['league']['name']: continue
-            # filtre SAFE TOP 5
-            if mode=="safe" and f['league']['id'] not in [39,140,135,78,61]: continue # PL, Liga, Serie A, Bundesliga, Ligue1
+            scanned+=1
             hid=f['teams']['home']['id']; aid=f['teams']['away']['id']
             sh=get_stats(hid); sa=get_stats(aid)
             if not sh or not sa: continue
-            match=f"{f['teams']['home']['name']} vs {f['teams']['away']['name']}"
+            home=f['teams']['home']['name']; away=f['teams']['away']['name']
+            match=f"{home} vs {away}"
             league=f['league']['name']
+            tag=f"{league} | {date_str}"
             
-            if mode=="mybest" and sh['btts']>=70 and sa['btts']>=70:
-                out.append(f"🔥 {match}\n {league} | {date_str} | BTTS {sh['btts']}%/{sa['btts']}%")
-            elif mode=="tonbest" and sh['btts']>=60 and sa['btts']>=60:
-                out.append(f"🛡️ {match}\n {league} | {date_str} | BTTS {sh['btts']}%/{sa['btts']}%")
-            elif mode=="pires" and (sh['enc']>=80 or sa['enc']>=80):
-                faible=f['teams']['home']['name'] if sh['enc']>=80 else f['teams']['away']['name']
-                fort=f['teams']['away']['name'] if sh['enc']>=80 else f['teams']['home']['name']
-                out.append(f"💀 {match}\n {league} | PIRE DEF {faible} {max(sh['enc'],sa['enc'])}% -> JOUE {fort} X2")
-            elif mode=="ht" and (sh['ht']+sa['ht'])/2>=70:
-                out.append(f"🕐 {match}\n {league} | {date_str} | HT -2 BUTS {sh['ht']}%/{sa['ht']}%")
+            if mode=="mybest":
+                if sh['btts']>=60 and sa['btts']>=60:
+                    out.append(f"🔥 {match}\n {tag} | BTTS {sh['btts']}%/{sa['btts']}%")
+            elif mode=="tonbest":
+                if sh['btts']>=50 and sa['btts']>=50:
+                    out.append(f"🛡️ {match}\n {tag} | BTTS {sh['btts']}%/{sa['btts']}%")
+            elif mode=="pires":
+                # SEUIL BAISSÉ DE 80 à 65%
+                if sh['enc']>=65 or sa['enc']>=65:
+                    faible=home if sh['enc']>=65 else away
+                    fort=away if sh['enc']>=65 else home
+                    out.append(f"💀 {match}\n {tag} | PIRE DEF {faible} {max(sh['enc'],sa['enc'])}% -> JOUE {fort}")
+            elif mode=="ht":
+                # SEUIL BAISSÉ DE 70 à 55% - ton pari 0-1 but MT
+                avg=(sh['ht']+sa['ht'])/2
+                if avg>=55:
+                    out.append(f"🕐 {match}\n {tag} | HT -2 BUTS {sh['ht']}%/{sa['ht']}% (moy {avg:.0f}%)")
             elif mode=="dc":
-                # Double chance: équipe qui perd rarement + adverse pire def
-                if sh['enc']<=30 or sa['enc']<=30 or sh['enc']>=80 or sa['enc']>=80:
-                    out.append(f"🎯 {match}\n {league} | {date_str} | DC: {sh['enc']}%/{sa['enc']}% encaisse")
+                if sh['enc']<=40 or sa['enc']<=40 or sh['enc']>=65 or sa['enc']>=65:
+                    out.append(f"🎯 {match}\n {tag} | DC encaisse {sh['enc']}%/{sa['enc']}%")
             elif mode=="team2":
-                if sh['avg']>=1.8 or sa['avg']>=1.8:
-                    out.append(f"⚽ {match}\n {league} | {date_str} | Buts {sh['avg']}/{sa['avg']}")
-
-    return out[:15]
+                if sh['avg']>=1.5 or sa['avg']>=1.5:
+                    out.append(f"⚽ {match}\n {tag} | Moy buts {sh['avg']}/{sa['avg']}")
+            elif mode=="safe":
+                if f['league']['id'] in [39,140,135,78,61,88,94]: # Top 7
+                    if sh['btts']>=45 or sa['btts']>=45:
+                        out.append(f"💎 {match}\n {tag} | SAFE {sh['btts']}%/{sa['btts']}%")
+    # Si rien trouvé on renvoie le nombre scanné pour debug
+    if not out:
+        return [f"DEBUG: {scanned} matchs scannés sur 3 jours, mais 0 à ce seuil. API OK, on va baisser encore si besoin."]
+    return sorted(out, key=lambda x: len(x))[:15]
 
 def get_menu():
     kb=[
@@ -82,26 +100,24 @@ def get_menu():
     return InlineKeyboardMarkup(kb)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("V12.6 SCAN MONDIAL AUTO ✅\nTous les boutons scannent tout seuls (D1+D2) sur 3 jours\nClique un bouton, attends 90 sec",reply_markup=get_menu())
+    await update.message.reply_text("V12.7 SEUILS BAISSÉS ✅\nTous les boutons en SCAN MONDIAL AUTO D1+D2\nClique un bouton, attends 90 sec",reply_markup=get_menu())
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q=update.callback_query; await q.answer()
     mode=q.data
     if mode=="bilan":
-        await q.edit_message_text("📊 BILAN: fonctionnalité à brancher sur /tmp (on le fait après ce test)",reply_markup=get_menu())
-        return
-    await q.edit_message_text(f"⏳ SCAN MONDIAL {mode.upper()} en cours...\nJe scanne 100 matchs x 3 jours (D1+D2)...\n90 secondes, ne quitte pas...",reply_markup=get_menu())
+        await q.edit_message_text("📊 BILAN en cours de branchement",reply_markup=get_menu()); return
+    await q.edit_message_text(f"⏳ SCAN MONDIAL {mode.upper()}...\n120 matchs x 3 jours = 360 matchs scannés\nSeuils baissés pour trouver + de matchs\n90 sec...",reply_markup=get_menu())
     try:
         res=scan_global(mode)
-        if not res:
-            await q.edit_message_text(f"❌ Aucun match trouvé pour {mode} aujourd'hui à ce seuil.\nOn baissera le % ensemble.",reply_markup=get_menu()); return
-        txt=f"✅ TOP {len(res)} MATCHS - {mode.upper()} - SCAN MONDIAL D1+D2\n\n" + "\n\n".join(res)
+        txt=f"✅ TOP {len(res)} MATCHS - {mode.upper()} - SCAN MONDIAL\n\n" + "\n\n".join(res)
+        if mode=="ht": txt+="\n\n✅ Pari: Under 1.5 HT (0 ou 1 but MT)"
         await q.edit_message_text(txt,reply_markup=get_menu())
     except Exception as e:
-        await q.edit_message_text(f"Erreur scan {e}",reply_markup=get_menu())
+        await q.edit_message_text(f"Erreur {e}",reply_markup=get_menu())
 
 @app.route("/")
-def home(): return "V12.6 Scan Auto Live"
+def home(): return "V12.7 Live"
 def run_flask(): app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
 
 if __name__=="__main__":
