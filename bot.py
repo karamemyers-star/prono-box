@@ -1,9 +1,8 @@
-import os, asyncio, threading, requests
+import os, threading, requests
 from datetime import datetime, timedelta
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-import pytz
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FOOT_API = os.getenv("FOOTBALL_API_KEY")
@@ -16,7 +15,6 @@ def save_chat_id(chat_id):
     try:
         with open(CHAT_ID_FILE, "w") as f: f.write(str(chat_id))
     except: pass
-
 def get_saved_chat_id():
     try:
         with open(CHAT_ID_FILE, "r") as f: return f.read().strip()
@@ -72,7 +70,7 @@ def scan_best_btts():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_chat_id(update.effective_chat.id)
-    await update.message.reply_text(f"PRONO BOX V11.2 AUTO 08H OK\nID {update.effective_chat.id} enregistre.\nAuto tous les jours 08h00 Douala.\n\n/best\n/safe")
+    await update.message.reply_text(f"PRONO BOX V11.2 AUTO 08H OK ID {update.effective_chat.id} enregistre. Auto 08h Douala actif.\n\n/best\n/safe")
 
 async def safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_chat_id(update.effective_chat.id)
@@ -82,16 +80,8 @@ async def safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Aucun match 100% conforme.")
         return
     m=best[0]
-    txt = (
-        f"MEILLEUR BTTS DU JOUR\n"
-        f"{m['date']} {m['time']} {m['league']}\n"
-        f"{m['home']} vs {m['away']}\n\n"
-        f"PRONO: BTTS OUI @ {m['cote_btts']}\n"
-        f"{m['home']} BTTS {m['stats_home']['btts_pct']}% Encaisse {m['stats_home']['encaisse_pct']}%\n"
-        f"{m['away']} BTTS {m['stats_away']['btts_pct']}% Encaisse {m['stats_away']['encaisse_pct']}%\n"
-        f"H2H BTTS {m['h2h_btts']}% | Conf {m['conf']}%"
-    )
-    await update.message.reply_text(txt)
+    msg = "MEILLEUR BTTS\n" + m['date'] + " " + m['time'] + " " + m['league'] + "\n" + m['home'] + " vs " + m['away'] + "\nPRONO BTTS OUI @1.75\n" + m['home'] + " BTTS " + str(m['stats_home']['btts_pct']) + "% Encaisse " + str(m['stats_home']['encaisse_pct']) + "%\n" + m['away'] + " BTTS " + str(m['stats_away']['btts_pct']) + "% Encaisse " + str(m['stats_away']['encaisse_pct']) + "%\nH2H " + str(m['h2h_btts']) + "% Conf " + str(m['conf']) + "%"
+    await update.message.reply_text(msg)
 
 async def best_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_chat_id(update.effective_chat.id)
@@ -102,7 +92,7 @@ async def best_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     txt = f"TOP {len(best)} PEPITES BTTS\n\n"
     for i,m in enumerate(best,1):
-        txt+=f"{i}. {m['date']} {m['home']} vs {m['away']} BTTS @ {m['cote_btts']} Conf {m['conf']}% H2H {m['h2h_btts']}%\n\n"
+        txt+=f"{i}. {m['date']} {m['home']} vs {m['away']} BTTS @1.75 Conf {m['conf']}% H2H {m['h2h_btts']}%\n\n"
     await update.message.reply_text(txt)
 
 async def auto_daily_job(context: ContextTypes.DEFAULT_TYPE):
@@ -110,21 +100,11 @@ async def auto_daily_job(context: ContextTypes.DEFAULT_TYPE):
     if not chat_id: return
     best=scan_best_btts()
     if not best:
-        await context.bot.send_message(chat_id=chat_id, text="Bonjour Joel - AUTO 08H: Aucun match 100% BTTS aujourd'hui.")
+        await context.bot.send_message(chat_id=chat_id, text="AUTO 08H: Aucun match 100% BTTS aujourd'hui.")
         return
     m=best[0]
-    txt = (
-        f"BONJOUR JOEL - AUTO 08H V11.2\n\n"
-        f"MEILLEUR BTTS DU JOUR\n"
-        f"{m['date']} {m['time']} {m['league']}\n"
-        f"{m['home']} vs {m['away']}\n\n"
-        f"PRONO: BTTS OUI @ {m['cote_btts']}\n"
-        f"DATA: {m['home']} BTTS {m['stats_home']['btts_pct']}% Encaisse {m['stats_home']['encaisse_pct']}% Over {m['stats_home']['over15_pct']}%\n"
-        f"DATA: {m['away']} BTTS {m['stats_away']['btts_pct']}% Encaisse {m['stats_away']['encaisse_pct']}% Over {m['stats_away']['over15_pct']}%\n"
-        f"H2H {m['h2h_btts']}% | Conf {m['conf']}%\n\n"
-        f"Je reviens demain 08h."
-    )
-    await context.bot.send_message(chat_id=chat_id, text=txt)
+    msg = "BONJOUR JOEL AUTO 08H\nMEILLEUR BTTS DU JOUR\n" + m['date'] + " " + m['time'] + " " + m['league'] + "\n" + m['home'] + " vs " + m['away'] + "\nPRONO BTTS OUI @1.75\n" + m['home'] + " BTTS " + str(m['stats_home']['btts_pct']) + "% Encaisse " + str(m['stats_home']['encaisse_pct']) + "%\n" + m['away'] + " BTTS " + str(m['stats_away']['btts_pct']) + "% Encaisse " + str(m['stats_away']['encaisse_pct']) + "%\nH2H " + str(m['h2h_btts']) + "% Conf " + str(m['conf']) + "%"
+    await context.bot.send_message(chat_id=chat_id, text=msg)
 
 @app.route("/")
 def home(): return "V11.2 AUTO 08H Live"
@@ -132,7 +112,6 @@ def home(): return "V11.2 AUTO 08H Live"
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
 
-# FIX du bug main thread que tu as vu dans les logs
 if __name__=="__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     try: requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
@@ -141,6 +120,7 @@ if __name__=="__main__":
     application.add_handler(CommandHandler("start",start))
     application.add_handler(CommandHandler("safe",safe))
     application.add_handler(CommandHandler("best",best_cmd))
-    tz=pytz.timezone("Africa/Douala")
-    application.job_queue.run_daily(auto_daily_job, time=datetime.strptime("08:00", "%H:%M").time().replace(tzinfo=tz), name="auto_08h")
+    # 07h UTC = 08h Douala (UTC+1)
+    import datetime as dt
+    application.job_queue.run_daily(auto_daily_job, time=dt.time(hour=7, minute=0), name="auto_08h")
     application.run_polling(drop_pending_updates=True)
