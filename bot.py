@@ -7,12 +7,9 @@ import pytz
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FOOT_API = os.getenv("FOOTBALL_API_KEY")
-CHAT_ID_FILE = "/tmp/chat_id.txt" # Pour se souvenir de toi pendant des mois
+CHAT_ID_FILE = "/tmp/chat_id.txt"
 
 app = Flask(__name__)
-try: requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
-except: pass
-
 HEADERS = {"x-apisports-key": FOOT_API}
 
 def save_chat_id(chat_id):
@@ -25,7 +22,6 @@ def get_saved_chat_id():
         with open(CHAT_ID_FILE, "r") as f: return f.read().strip()
     except: return None
 
-# --- TES CRITERES V11 DANS LES FONCTIONS ---
 def get_team_stats(team_id):
     try:
         url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last=10"
@@ -74,37 +70,77 @@ def scan_best_btts():
         except: continue
     return sorted(best,key=lambda x:x['conf'],reverse=True)
 
-# --- COMMANDES ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_chat_id(update.effective_chat.id)
-    await update.message.reply_text(f"PRONO BOX V11.2 AUTO 08H ✅\n\nTon ID {update.effective_chat.id} est enregistré.\nTous les jours à 08h00 (Douala), je t'envoie le meilleur BTTS automatiquement pendant des mois.\n\nTu es tranquille Joël.\n\n/best - voir maintenant\n/safe - le top 1")
+    await update.message.reply_text(f"PRONO BOX V11.2 AUTO 08H OK\nID {update.effective_chat.id} enregistre.\nAuto tous les jours 08h00 Douala.\n\n/best\n/safe")
 
 async def safe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_chat_id(update.effective_chat.id)
-    await update.message.reply_text("⏳ Scan V11 BTTS...")
+    await update.message.reply_text("Scan V11 BTTS en cours...")
     best=scan_best_btts()
-    if not best: await update.message.reply_text("Aucun match 100% conforme aujourd'hui."); return
+    if not best:
+        await update.message.reply_text("Aucun match 100% conforme.")
+        return
     m=best[0]
-    await update.message.reply_text(f"🔥 MEILLEUR BTTS DU JOUR\n\n📅 {m['date']} {m['time']} {m['league']}\n{m['home']} vs {m['away']}\n\nPRONO: BTTS OUI @ {m['cote_btts']}\n📊 {m['home']} BTTS {m['stats_home']['btts_pct']}% Encaisse {m['stats_home']['encaisse_pct']}%\n📊 {m['away']} BTTS {m['stats_away']['btts_pct']}% Encaisse {m['stats_away']['encaisse_pct']}%\nH2H BTTS {m['h2h_btts']}% | Conf {m['conf']}%")
+    txt = (
+        f"MEILLEUR BTTS DU JOUR\n"
+        f"{m['date']} {m['time']} {m['league']}\n"
+        f"{m['home']} vs {m['away']}\n\n"
+        f"PRONO: BTTS OUI @ {m['cote_btts']}\n"
+        f"{m['home']} BTTS {m['stats_home']['btts_pct']}% Encaisse {m['stats_home']['encaisse_pct']}%\n"
+        f"{m['away']} BTTS {m['stats_away']['btts_pct']}% Encaisse {m['stats_away']['encaisse_pct']}%\n"
+        f"H2H BTTS {m['h2h_btts']}% | Conf {m['conf']}%"
+    )
+    await update.message.reply_text(txt)
 
 async def best_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_chat_id(update.effective_chat.id)
-    await update.message.reply_text("⏳ Scan mondial...")
+    await update.message.reply_text("Scan mondial...")
     best=scan_best_btts()
-    if not best: await update.message.reply_text("0 match."); return
-    txt=f"🏆 TOP {len(best)} PEPITES BTTS\n\n"
+    if not best:
+        await update.message.reply_text("0 match.")
+        return
+    txt = f"TOP {len(best)} PEPITES BTTS\n\n"
     for i,m in enumerate(best,1):
-        txt+=f"{i}. {m['date']} {m['home']} vs {m['away']}\nBTTS @ {m['cote_btts']} | Conf {m['conf']}% | H2H {m['h2h_btts']}%\n\n"
+        txt+=f"{i}. {m['date']} {m['home']} vs {m['away']} BTTS @ {m['cote_btts']} Conf {m['conf']}% H2H {m['h2h_btts']}%\n\n"
     await update.message.reply_text(txt)
 
-# --- ENVOI AUTO 08H00 ---
 async def auto_daily_job(context: ContextTypes.DEFAULT_TYPE):
     chat_id=get_saved_chat_id()
     if not chat_id: return
-    print(f"[AUTO 08H] Scan pour {chat_id}...")
     best=scan_best_btts()
     if not best:
-        await context.bot.send_message(chat_id=chat_id, text="☀️ Bonjour Joël - V11.2 AUTO 08H\nAujourd'hui aucun match ne respecte 100% tes critères BTTS stricts. Je ne t'envoie rien de mauvais. On attend demain.")
+        await context.bot.send_message(chat_id=chat_id, text="Bonjour Joel - AUTO 08H: Aucun match 100% BTTS aujourd'hui.")
         return
     m=best[0]
-    await context.bot.send_message(chat_id=chat_id, text=f"☀️ Bonjour Joël - AUTO 08H
+    txt = (
+        f"BONJOUR JOEL - AUTO 08H V11.2\n\n"
+        f"MEILLEUR BTTS DU JOUR\n"
+        f"{m['date']} {m['time']} {m['league']}\n"
+        f"{m['home']} vs {m['away']}\n\n"
+        f"PRONO: BTTS OUI @ {m['cote_btts']}\n"
+        f"DATA: {m['home']} BTTS {m['stats_home']['btts_pct']}% Encaisse {m['stats_home']['encaisse_pct']}% Over {m['stats_home']['over15_pct']}%\n"
+        f"DATA: {m['away']} BTTS {m['stats_away']['btts_pct']}% Encaisse {m['stats_away']['encaisse_pct']}% Over {m['stats_away']['over15_pct']}%\n"
+        f"H2H {m['h2h_btts']}% | Conf {m['conf']}%\n\n"
+        f"Je reviens demain 08h."
+    )
+    await context.bot.send_message(chat_id=chat_id, text=txt)
+
+@app.route("/")
+def home(): return "V11.2 AUTO 08H Live"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+
+# FIX du bug main thread que tu as vu dans les logs
+if __name__=="__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    try: requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook?drop_pending_updates=true", timeout=10)
+    except: pass
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start",start))
+    application.add_handler(CommandHandler("safe",safe))
+    application.add_handler(CommandHandler("best",best_cmd))
+    tz=pytz.timezone("Africa/Douala")
+    application.job_queue.run_daily(auto_daily_job, time=datetime.strptime("08:00", "%H:%M").time().replace(tzinfo=tz), name="auto_08h")
+    application.run_polling(drop_pending_updates=True)
