@@ -1,81 +1,64 @@
-import requests
+import os, requests, time
+from flask import Flask
+from threading import Thread
 from datetime import datetime
+import telebot
 
-print("🚀 V32.1 ESPN UPTODATE - Lancement...")
+# --- CONFIG ---
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+bot = telebot.TeleBot(BOT_TOKEN)
+
+app = Flask(__name__)
+@app.route('/')
+def home(): return "V32 ONLINE ✅"
+
+Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
 
 BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
-DATE_TODAY = datetime.now().strftime("%Y%m%d")
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+LEAGUES = ["eng.1","fra.1","ger.1","ita.1","esp.1","swe.1","swe.2","aut.2","fin.1","ned.1"]
 
-# TOUS LES CHAMPIONNATS - Comme tu as demandé
-LEAGUES = [
-    "eng.1","fra.1","ger.1","ita.1","esp.1", # 5 grands
-    "eng.2","ger.2","ita.2","esp.2","fra.2", # D2
-    "ned.1","por.1","bel.1","tur.1","sui.1", # moyens
-    "swe.1","swe.2","nor.1","den.1","fin.1", # tes petits - Suède etc
-    "aut.1","aut.2","ned.2","sco.1","gre.1" # autres
-]
-
-def get_avg_goals(team_id, league):
-    """Retourne moyenne buts marqués sur 5 derniers matchs - saison 26/27"""
+def get_avg(team_id, league):
     try:
-        url = f"{BASE}/{league}/teams/{team_id}/schedule?season=2026"
-        r = requests.get(url, headers=HEADERS, timeout=8).json()
-        goals, count = 0, 0
-        for ev in r.get('events', [])[:5]:
-            if ev['status']['type']['state']!= 'post': continue
-            for c in ev['competitions'][0]['competitors']:
-                if str(c['id']) == str(team_id):
-                    goals += int(c.get('score', 0))
-                    count += 1
-        return goals / max(1, count)
-    except:
-        return 1.5 # valeur neutre si erreur
+        r = requests.get(f"{BASE}/{league}/teams/{team_id}/schedule?season=2026", timeout=7).json()
+        g,c = 0,0
+        for ev in r.get('events',[])[:5]:
+            if ev['status']['type']['state']!='post': continue
+            for comp in ev['competitions'][0]['competitors']:
+                if str(comp['id'])==str(team_id):
+                    g+=int(comp.get('score',0)); c+=1
+        return g/max(1,c)
+    except: return 1.5
 
-tickets_verts = []
+@bot.message_handler(commands=['start','scan','v32'])
+def scan_v32(message):
+    bot.send_message(message.chat.id, "🔍 Scan V32 ESPN en cours... (30s)")
+    DATE = datetime.now().strftime("%Y%m%d")
+    verts = []
+    for lg in LEAGUES:
+        try:
+            data = requests.get(f"{BASE}/{lg}/scoreboard?dates={DATE}", timeout=7).json()
+            for ev in data.get('events',[]):
+                if ev['status']['type']['state']=='post': continue
+                if ev['status']['type']['name']!='STATUS_SCHEDULED': continue
+                home = [c for c in ev['competitions'][0]['competitors'] if c['homeAway']=='home'][0]
+                away = [c for c in ev['competitions'][0]['competitors'] if c['homeAway']=='away'][0]
+                avg_h = get_avg(home['id'], lg)
+                avg_a = get_avg(away['id'], lg)
+                heure = ev['status']['type'].get('shortDetail','')
 
-for league in LEAGUES:
-    url = f"{BASE}/{league}/scoreboard?dates={DATE_TODAY}"
-    try:
-        data = requests.get(url, headers=HEADERS, timeout=8).json()
-        for ev in data.get('events', []):
-            # FILTRE 1 - MATCHS A JOUR SEULEMENT - ta consigne 5/5
-            if ev['status']['type']['state'] == 'post': continue
-            if ev['status']['type']['name']!= 'STATUS_SCHEDULED': continue
+                if avg_h < 0.8:
+                    conf = 83 if avg_h<0.5 else 78
+                    verts.append(f"🟢 {home['team']['displayName']} vs {away['team']['displayName']} ({lg} {heure})\n👉 {away['team']['displayName']} X2 + 0 MT | {conf}% | adv {avg_h:.2f} but/m\n")
+                if avg_a < 0.8:
+                    conf = 83 if avg_a<0.5 else 78
+                    verts.append(f"🟢 {home['team']['displayName']} vs {away['team']['displayName']} ({lg} {heure})\n👉 {home['team']['displayName']} 1X + 0 MT | {conf}% | adv {avg_a:.2f} but/m\n")
+        except: continue
 
-            comp = ev['competitions'][0]
-            home = [c for c in comp['competitors'] if c['homeAway'] == 'home'][0]
-            away = [c for c in comp['competitors'] if c['homeAway'] == 'away'][0]
+    if not verts:
+        bot.send_message(message.chat.id, "Aucun match vert aujourd'hui.")
+    else:
+        txt = f"✅ {len(verts)} MATCHS TROUVÉS\n\n" + "\n".join(verts[:10])
+        bot.send_message(message.chat.id, txt[:4000])
 
-            home_name = home['team']['displayName']
-            away_name = away['team']['displayName']
-            heure = ev['status']['type'].get('shortDetail', '')
-
-            # FILTRE 2 - ADVERSAIRE FAIBLE <0.8
-            avg_home = get_avg_goals(home['id'], league)
-            avg_away = get_avg_goals(away['id'], league)
-
-            # Logique V32: Si un est faible, l'autre est solide -> Double Chance + 0 MT
-            if avg_home < 0.8:
-                confiance = 83 if avg_home < 0.5 else 78 if avg_home < 0.65 else 71
-                pastille = "🟢" if confiance >= 75 else "🟠"
-                tickets_verts.append(f"{pastille} {home_name} vs {away_name} | {league} | {heure} | PARI: {away_name} X2 + 0 encaissé MT | {confiance}% | Adv {avg_home:.2f} but/m | {ev['id']}")
-
-            if avg_away < 0.8:
-                confiance = 83 if avg_away < 0.5 else 78 if avg_away < 0.65 else 71
-                pastille = "🟢" if confiance >= 75 else "🟠"
-                tickets_verts.append(f"{pastille} {home_name} vs {away_name} | {league} | {heure} | PARI: {home_name} 1X + 0 encaissé MT | {confiance}% | Adv {avg_away:.2f} but/m | {ev['id']}")
-
-    except Exception as e:
-        continue
-
-# TRI
-tickets_verts = sorted(tickets_verts, key=lambda x: int(x.split('|')[3].replace('%','').strip().split(' ')[0]) if '%' in x else 0, reverse=True)
-
-print(f"\n✅ SCAN FINI - {len(tickets_verts)} MATCHS VERTS TROUVÉS AUJOURD'HUI\n")
-for t in tickets_verts[:20]:
-    print(t)
-
-print("\n--- BEST OF BEST (Top 5) ---")
-for t in tickets_verts[:5]:
-    print(t)
+print("BOT V32 LANCE")
+bot.infinity_polling()
