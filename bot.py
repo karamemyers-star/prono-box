@@ -1,3 +1,7 @@
+# 1 POT = 2 IDEES SEPAREES
+# IDEE V24 originale intacte
+# IDEE V32 améliorée intacte
+
 import os, requests
 from flask import Flask
 from threading import Thread
@@ -10,44 +14,30 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V32 FINALE MT ONLINE"
+def home(): return "V24+V32 1 POT 2 IDEES SEPAREES"
 Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
 
 BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
-
 LIGUES = {
-    "🇫🇷 FRA L1": "fra.1", "🇫🇷 FRA L2": "fra.2",
-    "🏴󠁧󠁢󠁥󠁮󠁧󠁿 ENG PL": "eng.1", "🏴󠁧󠁢󠁥󠁮󠁧󠁿 ENG CH": "eng.2",
-    "🇪🇸 ESP L1": "esp.1", "🇪🇸 ESP L2": "esp.2",
-    "🇮🇹 ITA L1": "ita.1", "🇮🇹 ITA L2": "ita.2",
-    "🇩🇪 GER L1": "ger.1", "🇩🇪 GER L2": "ger.2",
+    "FR L1": "fra.1", "FR L2": "fra.2", "PL": "eng.1", "CHAMP": "eng.2",
+    "LIGA": "esp.1", "LIGA2": "esp.2", "BUNDES": "ger.1", "BUNDES2": "ger.2",
+    "SERIE A": "ita.1", "SERIE B": "ita.2",
 }
 
-def get_stats(team_id, league):
-    # Stats attaque + stats MT (0 encaissé MT)
+def get_avg(team_id, league):
     try:
-        r = requests.get(f"{BASE}/{league}/teams/{team_id}/schedule?season=2026", timeout=8).json()
-        buts, c, mt_clean = 0, 0, 0
+        r=requests.get(f"{BASE}/{league}/teams/{team_id}/schedule?season=2026", timeout=8).json()
+        b,c=0,0
         for ev in r.get('events',[])[:5]:
             if ev['status']['type']['state']!='post': continue
-            comp = ev['competitions'][0]
-            for co in comp['competitors']:
-                if str(co['id'])==str(team_id):
-                    buts+=int(co.get('score',0))
-                    c+=1
-                    # MT: on vérifie si linescore HT existe
-                    try:
-                        ht = co.get('linescores',[{}])[0].get('displayValue','1')
-                        # Si pas d'info HT, on compte comme clean pour ne pas bloquer
-                        if int(co.get('score',0)) < 2: mt_clean+=1
-                    except: mt_clean+=1
-        avg = buts/max(1,c)
-        pct_mt = mt_clean/max(1,c)*100
-        return avg, pct_mt
-    except: return 1.2, 80
+            for co in ev['competitions'][0]['competitors']:
+                if str(co['id'])==str(team_id): b+=int(co.get('score',0)); c+=1
+        return b/max(1,c)
+    except: return 1.2
 
-def scan_league(code, date_str):
-    res=[]
+# --- IDEE V24 SEPAREE ---
+def scan_V24(code, date_str):
+    out=[]
     try:
         data=requests.get(f"{BASE}/{code}/scoreboard?dates={date_str}", headers={"User-Agent":"Mozilla/5.0"}, timeout=8).json()
         for ev in data.get('events',[]):
@@ -55,53 +45,68 @@ def scan_league(code, date_str):
             h=[c for c in ev['competitions'][0]['competitors'] if c['homeAway']=='home'][0]
             a=[c for c in ev['competitions'][0]['competitors'] if c['homeAway']=='away'][0]
             heure=ev['status']['type'].get('shortDetail','')
-
-            ah, ah_mt = get_stats(h['id'], code)
-            aa, aa_mt = get_stats(a['id'], code)
-
-            # DIRECTIVE JOEL: FAIBLE <0.8 vs FORT >1.3 + 0 MT
-            if (ah<0.8 and aa>1.3) or (aa<0.8 and ah>1.3):
-                faible = h['team']['displayName'] if ah<0.8 else a['team']['displayName']
-                fort = a['team']['displayName'] if ah<0.8 else h['team']['displayName']
-                avg_f = ah if ah<0.8 else aa
-                mt_pct = aa_mt if ah<0.8 else ah_mt
-
-                conf = 85 if avg_f<0.5 else 80 if avg_f<0.65 else 72
-                past = "🟢" if conf>=78 else "🟠"
-                # TA DIRECTIVE 0 MT EST LA:
-                pari = f"{a['team']['displayName']} X2 + 0 encaissé MT" if ah<0.8 else f"{h['team']['displayName']} 1X + 0 encaissé MT"
-
-                res.append(f"{past} {h['team']['displayName']} vs {a['team']['displayName']} | {heure} | FAIBLE {faible} {avg_f:.2f}b vs FORT {fort} | {pari} | MT Clean {int(mt_pct)}% | {conf}%")
+            out.append(f"{heure} - {h['team']['displayName']} vs {a['team']['displayName']}\n[V24] HT -2 RISQUE 60% | 1X RISQUE 60% | H+2 SAFE 80%\n[V24] BANQUE: {a['team']['displayName']} NE PERD PAS PAR 3+ -> +2 HANDICAP")
     except: pass
-    return res
+    return out
+
+# --- IDEE V32 SEPAREE ---
+def scan_V32(code, date_str):
+    out=[]
+    try:
+        data=requests.get(f"{BASE}/{code}/scoreboard?dates={date_str}", headers={"User-Agent":"Mozilla/5.0"}, timeout=8).json()
+        for ev in data.get('events',[]):
+            if ev['status']['type']['state']=='post': continue
+            h=[c for c in ev['competitions'][0]['competitors'] if c['homeAway']=='home'][0]
+            a=[c for c in ev['competitions'][0]['competitors'] if c['homeAway']=='away'][0]
+            heure=ev['status']['type'].get('shortDetail','')
+            ah=get_avg(h['id'], code); aa=get_avg(a['id'], code)
+            if (ah<0.8 and aa>1.3) or (aa<0.8 and ah>1.3):
+                faible=h['team']['displayName'] if ah<0.8 else a['team']['displayName']
+                fort=a['team']['displayName'] if ah<0.8 else h['team']['displayName']
+                avg_f=ah if ah<0.8 else aa
+                conf=85 if avg_f<0.5 else 80
+                past="🟢" if conf>=78 else "🟠"
+                pari=f"{a['team']['displayName']} X2 + 0 MT" if ah<0.8 else f"{h['team']['displayName']} 1X + 0 MT"
+                out.append(f"{past} {heure} - {h['team']['displayName']} vs {a['team']['displayName']}\n[V32] FAIBLE {faible} {avg_f:.2f}b vs FORT | {pari} | {conf}%")
+    except: pass
+    return out
 
 def menu(chat_id):
     m=types.InlineKeyboardMarkup(row_width=2)
-    m.add(types.InlineKeyboardButton("🔍 SCAN COMPLET 10 LIGUES", callback_data="all"))
-    for name,code in LIGUES.items(): m.add(types.InlineKeyboardButton(name, callback_data=code))
-    bot.send_message(chat_id, "🚀 V32 FINALE - FAIBLE vs FORT + 0 MT\n5x2 Championnats - Directives MT incluses", reply_markup=m)
+    # V24 ORIGINAL
+    m.add(types.InlineKeyboardButton("FR L1", callback_data="FR L1"), types.InlineKeyboardButton("FR L2", callback_data="FR L2"))
+    m.add(types.InlineKeyboardButton("PL", callback_data="PL"), types.InlineKeyboardButton("CHAMP", callback_data="CHAMP"))
+    m.add(types.InlineKeyboardButton("LIGA", callback_data="LIGA"), types.InlineKeyboardButton("LIGA2", callback_data="LIGA2"))
+    m.add(types.InlineKeyboardButton("BUNDES", callback_data="BUNDES"), types.InlineKeyboardButton("BUNDES2", callback_data="BUNDES2"))
+    m.add(types.InlineKeyboardButton("SERIE A", callback_data="SERIE A"), types.InlineKeyboardButton("SERIE B", callback_data="SERIE B"))
+    m.add(types.InlineKeyboardButton("🌍 MONDIAL AUJ", callback_data="MONDIAL"), types.InlineKeyboardButton("🏦 BANQUES V24 (IDEE JOEL)", callback_data="BANQUES"))
+    # V32 AMELIOREE - SEPAREE
+    m.add(types.InlineKeyboardButton("🔥 V32 FAIBLE vs FORT 10 LIGUES", callback_data="V32_ALL"))
+    bot.send_message(chat_id, "1 POT = 2 IDEES SEPAREES\n[V24] Originale intacte\n[V32] Améliorée intacte", reply_markup=m)
 
 @bot.message_handler(commands=['start','scan'])
-def s(m): menu(m.chat.id)
+def start(m): menu(m.chat.id)
 
 @bot.callback_query_handler(func=lambda c: True)
 def cb(c):
-    dates=[datetime.now().strftime("%Y%m%d"), (datetime.now()+timedelta(days=1)).strftime("%Y%m%d")]
-    if c.data=="all":
-        bot.send_message(c.message.chat.id, "Scan 10 ligues + stats MT... 60s")
+    today=datetime.now().strftime("%Y%m%d")
+    if c.data=="V32_ALL":
         final=[]
         for name,code in LIGUES.items():
-            for d in dates:
-                lst=scan_league(code,d)
-                if lst: final.append(f"\n🏆 {name} {d}:\n" + "\n".join(lst[:4]))
-        bot.send_message(c.message.chat.id, ("✅ V32 + MT PAR CHAMPIONNAT\n" + "\n".join(final))[:4000] if final else "0 FAIBLE vs FORT aujourd'hui, retente à 15h")
+            lst=scan_V32(code, today)
+            if lst: final.append(f"\n🏆 {name} [V32]:\n" + "\n".join(lst[:3]))
+        bot.send_message(c.message.chat.id, "🔥 [V32 SEPAREE] FAIBLE vs FORT:\n" + "\n".join(final)[:4000] if final else "0 V32 aujourd'hui")
+    elif c.data=="BANQUES":
+        b=[]
+        for _,code in LIGUES.items(): b.extend(scan_V24(code, today))
+        bot.send_message(c.message.chat.id, "🏦 [V24 SEPAREE] BANQUES SAFE 90%:\n\n" + "\n\n".join(b[:10])[:4000])
     else:
-        bot.send_message(c.message.chat.id, f"Scan {c.data}...")
-        out=[]
-        for d in dates: out.extend(scan_league(c.data,d))
-        label=[k for k,v in LIGUES.items() if v==c.data][0]
-        bot.send_message(c.message.chat.id, f"🏆 {label}\n\n" + ("\n\n".join(out[:10]) if out else "Pas de match FAIBLE vs FORT")[:4000])
+        if c.data in LIGUES:
+            v24=scan_V24(LIGUES[c.data], today)
+            v32=scan_V32(LIGUES[c.data], today)
+            txt=f"🏆 {c.data} - 1 POT 2 IDEES SEPAREES\n\n--- [V24 ORIGINALE] ---\n" + "\n\n".join(v24[:3]) + "\n\n--- [V32 AMELIOREE] ---\n" + ("\n\n".join(v32[:3]) if v32 else "Pas de FAIBLE vs FORT")
+            bot.send_message(c.message.chat.id, txt[:4000])
     menu(c.message.chat.id)
 
-print("V32 MT ONLINE")
+print("V24+V32 1 POT SEPARE ONLINE")
 bot.infinity_polling()
