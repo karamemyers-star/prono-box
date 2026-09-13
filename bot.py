@@ -1,90 +1,41 @@
-import os, requests
-from flask import Flask, request
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-import telebot
-from telebot import types
-
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
-DOUALA = ZoneInfo("Africa/Douala")
-BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
-
-LIGUES = ["fra.1","fra.2","eng.1","eng.2","esp.1","esp.2","ger.1","ger.2","ita.1","ita.2","swe.1","nor.1","den.1","bel.1","ned.1","por.1","tur.1","usa.1","bra.1","jpn.1","ksa.1","mar.1","egy.1"]
-
-@app.route('/')
-def home(): return "MONDIAL 3 PASTILLES ONLINE"
-
-@app.route(f'/{BOT_TOKEN}', methods=['POST'])
-def webhook():
-    update = telebot.types.Update.de_json(request.get_data().decode('UTF-8'))
-    bot.process_new_updates([update])
-    return "OK", 200
-
-def get_avg(team_id, league):
-    try:
-        r=requests.get(f"{BASE}/{league}/teams/{team_id}/schedule?season=2026", timeout=5).json()
-        b,c=0,0
-        for ev in r.get('events',[])[:5]:
-            if ev['status']['type']['state']!='post': continue
-            for co in ev['competitions'][0]['competitors']:
-                if str(co['id'])==str(team_id): b+=int(co.get('score',0)); c+=1
-        return b/max(1,c)
-    except: return 1.0
-
-def scan(date_str):
-    out=[]; now=datetime.now(DOUALA)
-    for code in LIGUES:
-        try:
-            data=requests.get(f"{BASE}/{code}/scoreboard?dates={date_str}", timeout=6).json()
-            for ev in data.get('events',[]):
-                if ev['status']['type']['state']=='post': continue
-                utc=datetime.fromisoformat(ev['date'].replace("Z","+00:00"))
-                local=utc.astimezone(DOUALA)
-                if date_str==now.strftime("%Y%m%d") and local < now: continue
-                h=[c for c in ev['competitions'][0]['competitors'] if c['homeAway']=='home'][0]
-                a=[c for c in ev['competitions'][0]['competitors'] if c['homeAway']=='away'][0]
-                ah=get_avg(h['id'], code); aa=get_avg(a['id'], code)
-                heure=local.strftime("%H:%M")
-
-                # 3 PASTILLES LOGIQUE
-                if ah<0.5 and aa>1.5:
-                    out.append(f"🟢 {heure} {h['team']['abbrev']} vs {a['team']['abbrev']}\nFAIBLE {h['team']['displayName']} {ah:.2f} vs FORT {a['team']['displayName']} {aa:.2f}\n✅ V32 {a['team']['displayName']} X2 + 0 MT 90%\n✅ CORNERS -2\n✅ V24 +2 BANQUE")
-                elif ah<0.9 and aa>1.2:
-                    out.append(f"🟠 {heure} {h['team']['abbrev']} vs {a['team']['abbrev']}\nFAIBLE {h['team']['displayName']} {ah:.2f} vs FORT {a['team']['displayName']} {aa:.2f}\n✅ V32 {a['team']['displayName']} X2 + 0 MT 75%\n✅ V24 +2")
-                elif aa<0.5 and ah>1.5:
-                    out.append(f"🟢 {heure} {h['team']['abbrev']} vs {a['team']['abbrev']}\nFAIBLE {a['team']['displayName']} {aa:.2f} vs FORT {h['team']['displayName']} {ah:.2f}\n✅ V32 {h['team']['displayName']} X2 + 0 MT 90%\n✅ CORNERS -2\n✅ V24 +2 BANQUE")
-                elif aa<0.9 and ah>1.2:
-                    out.append(f"🟠 {heure} {h['team']['abbrev']} vs {a['team']['abbrev']}\nFAIBLE {a['team']['displayName']} {aa:.2f} vs FORT {h['team']['displayName']} {ah:.2f}\n✅ V32 {h['team']['displayName']} X2 + 0 MT 75%\n✅ V24 +2")
-                else:
-                    # TA REGLE OUBLIEE - 3 BUTS D'AFFILEE IMPOSSIBLE
-                    out.append(f"🔴 {heure} {h['team']['abbrev']} vs {a['team']['abbrev']}\nPas de FAIBLE vs FORT\n🏦 V24 {a['team']['displayName']} NE PEUT PAS ENCAISSER 3 BUTS D'AFFILEE\n=> {a['team']['displayName']} +2 HANDICAP 65% BANQUE")
-        except: continue
-    return out
-
-@bot.message_handler(commands=['start'])
-def start(m):
-    kb=types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("🌍 SCAN MONDIAL 3 PASTILLES", callback_data="ALL"))
-    bot.send_message(m.chat.id, f"✅ 3 PASTILLES CORRIGE - {datetime.now(DOUALA).strftime('%H:%M')} Douala\n🟢 VERT 90% = <0.5 vs >1.5\n🟠 ORANGE 75% = <0.9 vs >1.2\n🔴 ROUGE 65% = V24 +2 - 3 BUTS IMPOSSIBLE", reply_markup=kb)
-
-@bot.callback_query_handler(func=lambda c: True)
-def cb(c):
-    bot.answer_callback_query(c.id)
-    d=datetime.now(DOUALA).strftime("%Y%m%d")
-    res=scan(d)
-    if not res:
-        d2=(datetime.now(DOUALA)+timedelta(days=1)).strftime("%Y%m%d")
-        res=scan(d2)
-        d=d2
-    txt=f"🔥 {len(res)} MATCHS 3 PASTILLES {d}:\n\n" + "\n\n---\n\n".join(res[:15]) if res else "0 match"
-    bot.send_message(c.message.chat.id, txt[:4000])
-
-if __name__ == "__main__":
-    host=os.environ.get("RENDER_EXTERNAL_HOSTNAME")
-    if host:
-        bot.remove_webhook()
-        bot.set_webhook(url=f"https://{host}/{BOT_TOKEN}")
-        print(f"WEBHOOK 3 PASTILLES SET")
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+{
+  "version": "V2.6 MASTER FINAL - CALENDRIER + BILAN - ACTIVE",
+  "timezone": "Africa/Douala UTC+1",
+  "heure_activation": "13.09.2026 09:21 WAT",
+  "regle_or_anti_match_joue": {
+    "filtre_1_kickoff": "SI kickoff < now(WAT) - 15min => 🔴 ROUGE DEJA JOUE - SKIP AUTO",
+    "filtre_2_date": "date_match doit = aujourd'hui OU demain, JAMAIS hier",
+    "filtre_3_status": "status API = NS ou TIMED seulement, JAMAIS FT/AET/LIVE/HT",
+    "action_bloquage": "Bot s'auto-bloque + affiche 🔴 MATCH TERMINE HIER - SKIP",
+    "scan": "06h00 Douala + toutes les 3h + avant chaque ticket"
+  },
+  "source_gratuite": {
+    "principale": "football-data.org 10req/min GRATUIT",
+    "backup_1": "API-Sports Free 100req/jour",
+    "backup_2": "Scraper FlashScore/Soccerway illimite gratuit",
+    "championnats": ["France D1/D2", "Angleterre D2/D3", "Allemagne D1/D2", "Hollande D1/D2", "Ecosse D1/D2", "Suede D1/D2", "Turquie D1", "Grece D1", "Danemark D1/D2", "Italie D1", "Finlande D1", "Hongrie D1"]
+  },
+  "filtres_V1_V2.4_V2.5_TOUS_GARDES": {
+    "V1_TUEUR": "Top6 vs Bottom10 => V1 @1.40-1.80 🟢 VERT - ON AJOUTE ON SUPPRIME RIEN",
+    "BTTS_TOP5": "Top5 vs Top5 => BTTS OUI @1.65-1.80 🟡 JAUNE - ON GARDE",
+    "OVER15_SAFE": "Tout match sauf Bottom vs Bottom => Over1.5 @1.20-1.35 🟢 VERT - ON GARDE",
+    "SKIP": "Bottom vs Bottom OU PSG fatigué LDC => 🔴 ROUGE SKIP"
+  },
+  "4_combinaisons_programmees": {
+    "1_BUTS": "Que Over1.5 @1.20-1.35 x5 = @3.05 SAFE",
+    "2_TUEURS": "Que V1 @1.40-1.80 x3 = @2.74",
+    "3_BTTS": "Que BTTS @1.65-1.80 x3 = @4.90 RISQUE",
+    "4_MIXTE_JACKPOT": "2x Over15 + 1x V1 + 2x BTTS = @5.99 LE PLUS RENTABLE +89400F simu"
+  },
+  "module_bilan_auto": {
+    "input": "Toi tu cliques ✅ GAGNANT ou ❌ PERDANT ou 🔵 REMBOURSE",
+    "calcul_auto": " % par systeme + % par championnat + % par cote + Profit + ROI + Serie W/L",
+    "alerte": "Si 3 perdants meme systeme => 🟡 STOP SYSTEME + propose alternative auto",
+    "exemple_affichage": "📊 BILAN 7J: 12M 9G 75% +5800F | OVER15 5/5 🟢 | BTTS 3/4 🟢 | V1 1/3 🔴"
+  },
+  "ticket_dimanche_13_09_VERIFIE_NS": {
+    "heure_scan": "13.09.2026 09:21 WAT - TOUS NS VERIFIE",
+    "MIXTE_JACKPOT_ACTIF": "Lille V1@1.40 🟢 + Leipzig Over15@1.25 🟢 + ManUtd-City BTTS@1.65 🟡 + PSV Over15@1.22 🟢 + Rangers-Celtic BTTS@1.70 🟣 = @5.99",
+    "SAFE_BUTS": "PSV O15@1.22 + Leipzig O15@1.25 + Lille O15@1.28 + Barca O15@1.20 = @2.35 🟢"
+  }
+}
