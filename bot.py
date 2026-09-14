@@ -1,4 +1,4 @@
-# V2.7 MASTER FIX - SANS CLE ILLIMITE
+# V2.7 MASTER FIX - SANS CLE ILLIMITE - 14/09/2026
 import json, os, datetime, random
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update
@@ -42,15 +42,15 @@ def add_played(fixtures):
     save_data(data)
 
 def est_corse(name):
-    corse = ["ManUtd-City","Rangers-Celtic","Austria Wien","Inter","Arsenal","Real Madrid","Barcelona","Man City","Leeds","Roma"]
+    corse = ["ManUtd-City","Rangers-Celtic","Austria Wien","Inter","Arsenal","Real Madrid","Barcelona","Man City"]
     for k in corse:
         if k.lower() in name.lower():
             return True
     return False
 
-def simuler_marge(att, defe, is_corse):
+def simuler_marge(att, defe, is_corse_flag):
     brut = (att + defe) / 2.0
-    if not is_corse:
+    if not is_corse_flag:
         return brut, brut, "SAFE"
     piege = brut + 1.0
     if piege >= 2.5:
@@ -66,22 +66,19 @@ def get_today_pool():
     return pool
 
 def build_reco(m):
-    is_corse = est_corse(m['fixture']) or 'BAN' in m['type']
-    brut, piege, reco_type = simuler_marge(m['att'], m['def'], is_corse)
-    if 'BTTS' in m['choix'] and is_corse:
+    is_corse_flag = est_corse(m['fixture']) or 'BAN' in m['type']
+    brut, piege, reco_type = simuler_marge(m['att'], m['def'], is_corse_flag)
+    if 'BTTS' in m['choix'] and is_corse_flag:
         pb = f"B BAN {m['pct']}% | {m['choix']}"
         pr = f"RECO V2.7: H+2.0 + Over1.5 @1.66 (88%)"
-        pct = 88
     else:
         if '@1.40' in m['choix']:
             pr = f"RECO V2.7: V1 + Over1.5 @1.55 (83%) + H+2.0"
-            pct = 83
         else:
             pr = f"RECO V2.7: {m['choix']} SAFE + H+2.0 (82%)"
-            pct = 82
         pb = f"G Brut: {m['choix']} ({m['pct']}%)"
     marge = f"Marge +1: {m['att']}->{m['att']+1} | {brut:.1f}->{piege:.1f} | {reco_type} sauve 9/18"
-    return pb, pr, marge, pct
+    return pb, pr, marge
 
 def generate_image(tickets):
     W, H = 1080, 1920
@@ -102,42 +99,10 @@ def generate_image(tickets):
     draw.text((30, y), f'{now} | ANTI-HIER + KICKOFF>15MIN + ANTI-DOUBLON 4M', font=font_tiny, fill=(200,200,200))
     y+=35
     for i, t in enumerate(tickets[:3], 1):
-        pb, pr, marge, pct = build_reco(t)
+        pb, pr, marge = build_reco(t)
         draw.text((30, y), f"{i}. SAFE {t['fixture']} {t['kickoff']}", font=font_small, fill=(255,255,255))
         y+=28
         draw.text((30, y), pb, font=font_tiny, fill=(255,200,100))
         y+=22
         draw.text((30, y), pr, font=font_tiny, fill=(0,255,255))
         y+=22
-        draw.text((30, y), marge, font=font_tiny, fill=(150,150,150))
-        y+=38
-    draw.text((30, H-90), 'BILAN: 88.8% (+27.5%) | 150+ MATCHS | H+2.0 sauve 9/18', font=font_small, fill=(0,255,0))
-    draw.text((30, H-55), f"TICKET SAFE: @{random.uniform(4.0,5.8):.2f}", font=font_small, fill=(255,255,0))
-    img.save(IMAGE_FILE)
-    return IMAGE_FILE
-
-async def ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = load_data()
-    pool = get_today_pool()
-    filtered = []
-    seen_today = set()
-    for m in pool:
-        fix = m['fixture']
-        if fix in seen_today:
-            continue
-        if is_doublon(fix, data):
-            continue
-        filtered.append(m)
-        seen_today.add(fix)
-    if not filtered:
-        await update.message.reply_text(f'{VERSION}: Aucun match, filtre ANTI-DOUBLON 4M actif.')
-        return
-    img_path = generate_image(filtered)
-    add_played([m['fixture'] for m in filtered])
-    txt = f"{VERSION} - {datetime.datetime.now().strftime('%d.%m %H:%M WAT')}\n"
-    txt += "FILTRES: ANTI-HIER + KICKOFF>15MIN + ANTI-DOUBLON 4M\n\n"
-    for m in filtered[:3]:
-        pb, pr, marge, pct = build_reco(m)
-        txt += f"SAFE {m['fixture']} {m['kickoff']}\n{pb}\n{pr}\n{marge}\n\n"
-    txt += "BILAN 150+ MATCHS: 88.8% (+27.5%)\n"
-    await update.message.reply_photo(photo=open
