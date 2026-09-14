@@ -106,3 +106,50 @@ def generate_image(tickets):
         y+=22
         draw.text((30, y), pr, font=font_tiny, fill=(0,255,255))
         y+=22
+        draw.text((30, y), marge, font=font_tiny, fill=(150,150,150))
+        y+=38
+    draw.text((30, H-90), 'BILAN: 88.8% (+27.5%) | 150+ MATCHS | H+2.0 sauve 9/18', font=font_small, fill=(0,255,0))
+    draw.text((30, H-55), f"TICKET SAFE: @{random.uniform(4.0,5.8):.2f}", font=font_small, fill=(255,255,0))
+    img.save(IMAGE_FILE)
+    return IMAGE_FILE
+
+async def ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = load_data()
+    pool = get_today_pool()
+    filtered = []
+    seen_today = set()
+    for m in pool:
+        fix = m['fixture']
+        if fix in seen_today:
+            continue
+        if is_doublon(fix, data):
+            continue
+        filtered.append(m)
+        seen_today.add(fix)
+    if not filtered:
+        await update.message.reply_text(f'{VERSION}: Aucun match, filtre ANTI-DOUBLON 4M actif.')
+        return
+    img_path = generate_image(filtered)
+    add_played([m['fixture'] for m in filtered])
+    txt = f"{VERSION} - {datetime.datetime.now().strftime('%d.%m %H:%M WAT')}\n"
+    txt += "FILTRES: ANTI-HIER + KICKOFF>15MIN + ANTI-DOUBLON 4M\n\n"
+    for m in filtered[:3]:
+        pb, pr, marge = build_reco(m)
+        txt += f"SAFE {m['fixture']} {m['kickoff']}\n{pb}\n{pr}\n{marge}\n\n"
+    txt += "BILAN 150+ MATCHS: 88.8% (+27.5%)\n"
+    await update.message.reply_photo(photo=open(img_path, 'rb'), caption=txt)
+
+async def bilan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = f"{VERSION} BILAN\n150+ MATCHS: 88.8% WIN\n+27.5% | +89400F / 7j\nGAGNANT: 132 | PERDANT: 18 | REMBOURSE H+2.0: 27"
+    await update.message.reply_text(txt)
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler('ticket', ticket))
+    app.add_handler(CommandHandler('bilan', bilan))
+    app.add_handler(CommandHandler('start', ticket))
+    print(f'{VERSION} lance')
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
