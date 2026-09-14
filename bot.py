@@ -1,5 +1,5 @@
-# V2.7 MASTER FIX - SANS CLE ILLIMITE - 14/09/2026
-import json, os, datetime, random
+# V2.7 MASTER FIX - SANS CLE ILLIMITE - CODE BETON
+import json, os, datetime
 from PIL import Image, ImageDraw, ImageFont
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -58,12 +58,12 @@ def simuler_marge(att, defe, is_corse_flag):
     return brut, piege, "H+2.0"
 
 def get_today_pool():
-    pool = [
+    # ICI tu brancheras ton scraper FlashScore sans cle
+    return [
         {"fixture": "Leeds vs Newcastle", "kickoff": "20:00", "choix": "V1 @1.40", "pct": 67, "att": 1.8, "def": 0.9, "type": "SAFE"},
         {"fixture": "Austria Wien vs Rapid Wien", "kickoff": "19:30", "choix": "BTTS @1.70", "pct": 35, "att": 1.6, "def": 1.4, "type": "BAN DERBY"},
         {"fixture": "Torino vs Roma", "kickoff": "21:00", "choix": "V1 @1.40", "pct": 70, "att": 1.5, "def": 1.0, "type": "SAFE"},
     ]
-    return pool
 
 def build_reco(m):
     is_corse_flag = est_corse(m['fixture']) or 'BAN' in m['type']
@@ -72,44 +72,37 @@ def build_reco(m):
         pb = f"B BAN {m['pct']}% | {m['choix']}"
         pr = f"RECO V2.7: H+2.0 + Over1.5 @1.66 (88%)"
     else:
-        if '@1.40' in m['choix']:
-            pr = f"RECO V2.7: V1 + Over1.5 @1.55 (83%) + H+2.0"
-        else:
-            pr = f"RECO V2.7: {m['choix']} SAFE + H+2.0 (82%)"
+        pr = f"RECO V2.7: V1 + Over1.5 @1.55 (83%) + H+2.0" if '@1.40' in m['choix'] else f"RECO V2.7: {m['choix']} SAFE + H+2.0 (82%)"
         pb = f"G Brut: {m['choix']} ({m['pct']}%)"
     marge = f"Marge +1: {m['att']}->{m['att']+1} | {brut:.1f}->{piege:.1f} | {reco_type} sauve 9/18"
     return pb, pr, marge
 
 def generate_image(tickets):
-    W, H = 1080, 1920
+    W, H = 1080, 1080
     img = Image.new('RGB', (W, H), (10,10,10))
     draw = ImageDraw.Draw(img)
     try:
         font_title = ImageFont.truetype('DejaVuSans-Bold.ttf', 26)
         font_small = ImageFont.truetype('DejaVuSans.ttf', 20)
-        font_tiny = ImageFont.truetype('DejaVuSans.ttf', 17)
+        font_tiny = ImageFont.truetype('DejaVuSans.ttf', 16)
+        font_mini = ImageFont.truetype('DejaVuSans.ttf', 14)
     except:
-        font_title = ImageFont.load_default()
-        font_small = ImageFont.load_default()
-        font_tiny = ImageFont.load_default()
-    y = 30
-    draw.text((30, y), f'{VERSION} - SANS CLE ILLIMITE', font=font_title, fill=(0,255,0))
+        font_title = font_small = font_tiny = font_mini = ImageFont.load_default()
+    y=30
+    draw.text((30,y), f'{VERSION} - SANS CLE ILLIMITE', font=font_title, fill=(0,255,120))
     y+=45
     now = datetime.datetime.now().strftime('%d.%m.%Y %H:%M WAT')
-    draw.text((30, y), f'{now} | ANTI-HIER + KICKOFF>15MIN + ANTI-DOUBLON 4M', font=font_tiny, fill=(200,200,200))
+    draw.text((30,y), f'{now} | ANTI-HIER + KICKOFF>15MIN + ANTI-DOUBLON 4M', font=font_mini, fill=(180,180,180))
     y+=35
-    for i, t in enumerate(tickets[:3], 1):
-        pb, pr, marge = build_reco(t)
-        draw.text((30, y), f"{i}. SAFE {t['fixture']} {t['kickoff']}", font=font_small, fill=(255,255,255))
-        y+=28
-        draw.text((30, y), pb, font=font_tiny, fill=(255,200,100))
-        y+=22
-        draw.text((30, y), pr, font=font_tiny, fill=(0,255,255))
-        y+=22
-        draw.text((30, y), marge, font=font_tiny, fill=(150,150,150))
-        y+=38
-    draw.text((30, H-90), 'BILAN: 88.8% (+27.5%) | 150+ MATCHS | H+2.0 sauve 9/18', font=font_small, fill=(0,255,0))
-    draw.text((30, H-55), f"TICKET SAFE: @{random.uniform(4.0,5.8):.2f}", font=font_small, fill=(255,255,0))
+    for i,t in enumerate(tickets[:3],1):
+        pb,pr,marge = build_reco(t)
+        draw.rounded_rectangle([(25,y-5),(W-25,y+95)], radius=12, fill=(18,18,18), outline=(35,35,35))
+        draw.text((35,y), f"{i}. SAFE {t['fixture']} {t['kickoff']}", font=font_small, fill=(255,255,255))
+        y+=28; draw.text((35,y), f" {pb}", font=font_tiny, fill=(255,180,100))
+        y+=22; draw.text((35,y), f" {pr}", font=font_tiny, fill=(0,255,200))
+        y+=22; draw.text((35,y), f" {marge}", font=font_mini, fill=(140,140,140))
+        y+=45
+    draw.text((30,H-90), 'BILAN: 88.8% WIN | 150+ MATCHS | +27.5% (+89400F)', font=font_small, fill=(0,255,120))
     img.save(IMAGE_FILE)
     return IMAGE_FILE
 
@@ -120,35 +113,29 @@ async def ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
     seen_today = set()
     for m in pool:
         fix = m['fixture']
-        if fix in seen_today:
-            continue
-        if is_doublon(fix, data):
-            continue
+        if fix in seen_today: continue
+        if is_doublon(fix, data): continue
         filtered.append(m)
         seen_today.add(fix)
     if not filtered:
-        await update.message.reply_text(f'{VERSION}: Aucun match, filtre ANTI-DOUBLON 4M actif.')
+        await update.message.reply_text(f'{VERSION}: Aucun match filtre actif')
         return
     img_path = generate_image(filtered)
     add_played([m['fixture'] for m in filtered])
-    txt = f"{VERSION} - {datetime.datetime.now().strftime('%d.%m %H:%M WAT')}\n"
-    txt += "FILTRES: ANTI-HIER + KICKOFF>15MIN + ANTI-DOUBLON 4M\n\n"
+    txt = f"{VERSION}\n"
     for m in filtered[:3]:
-        pb, pr, marge = build_reco(m)
-        txt += f"SAFE {m['fixture']} {m['kickoff']}\n{pb}\n{pr}\n{marge}\n\n"
-    txt += "BILAN 150+ MATCHS: 88.8% (+27.5%)\n"
-    await update.message.reply_photo(photo=open(img_path, 'rb'), caption=txt)
+        pb,pr,marge = build_reco(m)
+        txt+=f"SAFE {m['fixture']} {m['kickoff']}\n{pb}\n{pr}\n{marge}\n\n"
+    await update.message.reply_photo(photo=open(img_path,'rb'), caption=txt)
 
 async def bilan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = f"{VERSION} BILAN\n150+ MATCHS: 88.8% WIN\n+27.5% | +89400F / 7j\nGAGNANT: 132 | PERDANT: 18 | REMBOURSE H+2.0: 27"
-    await update.message.reply_text(txt)
+    await update.message.reply_text(f"{VERSION} BILAN\n150+ MATCHS: 88.8% WIN\n+27.5% | +89400F\n132W | 18L | 27 REMBOURSE H+2.0")
 
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler('ticket', ticket))
     app.add_handler(CommandHandler('bilan', bilan))
     app.add_handler(CommandHandler('start', ticket))
-    print(f'{VERSION} lance')
     app.run_polling()
 
 if __name__ == '__main__':
