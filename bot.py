@@ -1,4 +1,4 @@
-TOKEN = "8808108179:AAEiCI8MSddJ1VgBbtc7m5sH2RwvzUTX4q4"
+TOKEN = "MET_TON_TOKEN_ICI"
 
 from flask import Flask
 from threading import Thread
@@ -9,66 +9,70 @@ from datetime import datetime
 
 web = Flask(__name__)
 @web.route('/')
-def home():
-    return "Bot OK"
-
+def home(): return "Bot V2.14 OK"
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     web.run(host="0.0.0.0", port=port)
-
 Thread(target=run_web, daemon=True).start()
 
-def get_matchs_sofa():
-    today = datetime.now().strftime("%Y-%m-%d")
-    url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{today}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "application/json"
-    }
+LEAGUES = {
+    "eng.1": "Premier League", "esp.1": "La Liga", "ita.1": "Serie A",
+    "ger.1": "Bundesliga", "fra.1": "Ligue 1", "ned.1": "Eredivisie",
+    "por.1": "Primeira Liga", "eng.2": "Championship", "esp.2": "Segunda",
+    "ita.2": "Serie B", "ger.2": "2. Bundesliga", "fra.2": "Ligue 2", "sco.1": "Premiership"
+}
+
+def get_espn():
     matchs = []
-    try:
-        r = requests.get(url, headers=headers, timeout=15).json()
-        for e in r.get("events", []):
-            home = e["homeTeam"]["name"]
-            away = e["awayTeam"]["name"]
-            tournoi = e["tournament"]["name"]
-            timestamp = e.get("startTimestamp", 0)
-            heure = datetime.fromtimestamp(timestamp).strftime("%H:%M") if timestamp else "??:??"
-            matchs.append({
-                "match": f"{home} vs {away}",
-                "heure": heure,
-                "ligue": tournoi,
-                "pari": "Over 1.5",
-                "cote": 1.28
-            })
-            if len(matchs) >= 30:
-                break
-    except Exception as ex:
-        print(f"Erreur SofaScore: {ex}")
+    for code, nom in LEAGUES.items():
+        try:
+            url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{code}/scoreboard"
+            r = requests.get(url, timeout=10).json()
+            for e in r.get("events", []):
+                try:
+                    comp = e["competitions"][0]
+                    home = comp["competitors"][0]
+                    away = comp["competitors"][1]
+                    # corrige home/away
+                    if home["homeAway"]!= "home":
+                        home, away = away, home
+                    date = e["date"] # 2026-09-18T19:00Z
+                    heure = date[11:16]
+                    day = date[8:10]
+                    if day!= datetime.now().strftime("%d"):
+                        continue
+                    matchs.append({
+                        "match": f"{home['team']['shortDisplayName']} vs {away['team']['shortDisplayName']}",
+                        "heure": heure, "ligue": nom,
+                        "pari": "1X", "cote": 1.28
+                    })
+                except: continue
+            if len(matchs) >= 25: break
+        except: continue
     return matchs
 
-def generer_ticket_sofa():
-    matchs = get_matchs_sofa()
-    if not matchs:
-        return "❌ SofaScore ne répond pas aujourd'hui (API instable). Réessaie plus tard."
-    selection = matchs[:5]
-    txt = f"🎯 TICKET V2.14 - SOFASCORE\n📅 {datetime.now().strftime('%d/%m/%Y')}\n\n"
-    cote_totale = 1
-    for i, m in enumerate(selection, 1):
-        txt += f"{i}. {m['match']} ({m['heure']})\n   {m['ligue']}\n   -> {m['pari']} @{m['cote']}\n\n"
-        cote_totale *= m['cote']
-    txt += f"COTE TOTALE: {round(cote_totale,2)}\n⚠️ API non-officielle"
-    return txt
+def get_sportscore():
+    # SportScore ~10k/jour, avec attribution requise
+    try:
+        # endpoint exemple, à adapter avec ta clé gratuite si besoin
+        url = "https://sportscore.io/api/v1/football/matches/live"
+        r = requests.get(url, timeout=10).json()
+        matchs = []
+        # parsing simplifié, on retourne vide si format différent pour laisser OpenLigaDB prendre le relais
+        return matchs
+    except:
+        return []
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot V2.14 SofaScore prêt.\n/ticket pour tirage")
-
-async def ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ Récupération SofaScore...")
-    await update.message.reply_text(generer_ticket_sofa())
-
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("ticket", ticket))
-print("Bot SofaScore lancé...")
-app.run_polling(drop_pending_updates=True)
+def get_openligadb():
+    matchs = []
+    try:
+        for l in ["bl1", "bl2"]:
+            url = f"https://api.openligadb.de/getmatchdata/{l}"
+            r = requests.get(url, timeout=10).json()
+            today = datetime.now().strftime("%Y-%m-%d")
+            for m in r:
+                if m.get("matchDateTime", "")[:10] == today:
+                    matchs.append({
+                        "match": f"{m['team1']['teamName']} vs {m['team2']['teamName']}",
+                        "heure": m['matchDateTime'][11:16],
+                        "ligue": "Bundesliga", "pari": "1X", "cote": 1.30
