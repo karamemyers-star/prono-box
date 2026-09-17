@@ -1,4 +1,4 @@
-TOKEN = "MET_TON_NOUVEAU_TOKEN_ICI"
+TOKEN = "8808108179:AAEiCI8MSddJ1VgBbtc7m5sH2RwvzUTX4q4"
 
 from flask import Flask
 from threading import Thread
